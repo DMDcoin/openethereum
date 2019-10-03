@@ -56,7 +56,7 @@ use parity_crypto::publickey::Signature;
 use io::{IoContext, IoHandler, TimerToken, IoService};
 use itertools::{self, Itertools};
 use rlp::{encode, Decodable, DecoderError, Encodable, RlpStream, Rlp};
-use ethereum_types::{H256, H520, Address, U128, U256};
+use ethereum_types::{H256, H512, H520, Address, U128, U256};
 use parking_lot::{Mutex, RwLock};
 use time_utils::CheckedSystemTime;
 use common_types::{
@@ -1216,7 +1216,7 @@ impl Engine for AuthorityRound {
 		SealingState::Ready
 	}
 
-	fn handle_message(&self, rlp: &[u8]) -> Result<(), EngineError> {
+	fn handle_message(&self, rlp: &[u8], _node_id: Option<H512>) -> Result<(), EngineError> {
 		fn fmt_err<T: ::std::fmt::Debug>(x: T) -> EngineError {
 			EngineError::MalformedMessage(format!("{:?}", x))
 		}
