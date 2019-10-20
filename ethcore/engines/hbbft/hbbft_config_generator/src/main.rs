@@ -14,12 +14,14 @@ use clap::{App, Arg};
 use ethkey::{Address, Generator, KeyPair, Public, Random, Secret};
 use ethstore::{KeyFile, SafeAccount};
 use hbbft::crypto::serde_impl::SerdeSecret;
+use hbbft::sync_key_gen::{AckOutcome, PartOutcome, PublicKey, SecretKey, SyncKeyGen};
 use hbbft::NetworkInfo;
 use rustc_hex::ToHex;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::fs;
+use std::sync::Arc;
 use toml::{map::Map, Value};
 
 fn create_account() -> (Secret, Public, Address) {
@@ -48,6 +50,84 @@ impl ToString for Enode {
 		let port = 30300usize + self.idx;
 		format!("enode://{:x}@{}:{}", self.public, self.ip, port)
 	}
+}
+
+#[derive(Clone)]
+struct KeyPairWrapper {
+	public: Public,
+	secret: Secret,
+}
+
+impl PublicKey for KeyPairWrapper {
+	type Error = ethkey::crypto::Error;
+	type SecretKey = KeyPairWrapper;
+	fn encrypt<M: AsRef<[u8]>, R: rand::Rng>(
+		&self,
+		msg: M,
+		_rng: &mut R,
+	) -> Result<Vec<u8>, Self::Error> {
+		ethkey::crypto::ecies::encrypt(&self.public, b"", msg.as_ref())
+	}
+}
+
+impl SecretKey for KeyPairWrapper {
+	type Error = ethkey::crypto::Error;
+	fn decrypt(&self, ct: &[u8]) -> Result<Vec<u8>, Self::Error> {
+		ethkey::crypto::ecies::decrypt(&self.secret, b"", ct)
+	}
+}
+
+fn generate_keygens<R: rand::Rng>(
+	key_pairs: Arc<BTreeMap<Public, KeyPairWrapper>>,
+	mut rng: &mut R,
+	t: usize,
+) -> Vec<SyncKeyGen<Public, KeyPairWrapper>> {
+	// Get SyncKeyGen and Parts
+	let (mut sync_keygen, parts): (Vec<_>, Vec<_>) = key_pairs
+		.iter()
+		.map(|(n, kp)| {
+			let s = SyncKeyGen::new(n.clone(), kp.clone(), key_pairs.clone(), t, &mut rng).unwrap();
+			(s.0, (n, s.1.unwrap()))
+		})
+		.unzip();
+
+	// All SyncKeyGen process all parts, returning Acks
+	let acks: Vec<_> = sync_keygen
+		.iter_mut()
+		.flat_map(|s| {
+			parts
+				.iter()
+				.map(|(n, p)| {
+					(
+						s.our_id().clone(),
+						s.handle_part(n, p.clone(), &mut rng).unwrap(),
+					)
+				})
+				.collect::<Vec<_>>()
+		})
+		.collect();
+
+	// All SyncKeyGen process all Acks
+	let ack_outcomes: Vec<_> = sync_keygen
+		.iter_mut()
+		.flat_map(|s| {
+			acks.iter()
+				.map(|(n, p)| match p {
+					PartOutcome::Valid(a) => s.handle_ack(n, a.as_ref().unwrap().clone()).unwrap(),
+					_ => panic!("Expected Part Outcome to be valid"),
+				})
+				.collect::<Vec<_>>()
+		})
+		.collect();
+
+	// Check all Ack Outcomes
+	for ao in ack_outcomes {
+		if let AckOutcome::Invalid(_) = ao {
+			panic!("Expecting Ack Outcome to be valid");
+		}
+	}
+
+	sync_keygen
 }
 
 fn generate_enodes(num_nodes: usize, external_ip: Option<&str>) -> BTreeMap<Public, Enode> {
@@ -260,6 +340,21 @@ arg_enum! {
 	}
 }
 
+fn enodes_to_pub_keys(enodes: &BTreeMap<Public, Enode>) -> Arc<BTreeMap<Public, KeyPairWrapper>> {
+	Arc::new(enodes
+		.iter()
+		.map(|(n, e)| {
+			(
+				n.clone(),
+				KeyPairWrapper {
+					public: e.public,
+					secret: e.secret.clone(),
+				},
+			)
+		})
+		.collect())
+}
+
 fn main() {
 	let matches = App::new("hbbft parity config generator")
 		.version("1.0")
@@ -414,5 +509,57 @@ mod tests {
 		.unwrap();
 		let config: TomlHbbftOptions = toml::from_str(&toml_string).unwrap();
 		compare(net_info, &config);
+	}
+
+	#[test]
+	fn test_threshold_encryption_single() {
+		let (secret, public, _) = crate::create_account();
+		let keypair = KeyPairWrapper { public, secret };
+		let mut pub_keys: BTreeMap<Public, KeyPairWrapper> = BTreeMap::new();
+		pub_keys.insert(public, keypair.clone());
+		let mut rng = rand::thread_rng();
+		let mut key_gen =
+			SyncKeyGen::new(public, keypair, Arc::new(pub_keys), 0, &mut rng).unwrap();
+		let part = key_gen.1.unwrap();
+		let outcome = key_gen.0.handle_part(&public, part, &mut rng);
+		assert!(outcome.is_ok());
+		match outcome.unwrap() {
+			PartOutcome::Valid(ack) => {
+				assert!(ack.is_some());
+				let ack_outcome = key_gen.0.handle_ack(&public, ack.unwrap());
+				assert!(ack_outcome.is_ok());
+				match ack_outcome.unwrap() {
+					AckOutcome::Valid => {
+						assert!(key_gen.0.is_ready());
+						let key_shares = key_gen.0.generate();
+						assert!(key_shares.is_ok());
+						assert!(key_shares.unwrap().1.is_some());
+					}
+					AckOutcome::Invalid(_) => assert!(false),
+				}
+			}
+			PartOutcome::Invalid(_) => assert!(false),
+		}
+	}
+
+	#[test]
+	fn test_threshold_encryption_multiple() {
+		let num_nodes = 4;
+		let t = 1;
+
+		let enodes = generate_enodes(num_nodes, None);
+		let pub_keys = enodes_to_pub_keys(&enodes);
+		let mut rng = rand::thread_rng();
+
+		let sync_keygen = generate_keygens(pub_keys, &mut rng, t);
+
+		let compare_to = sync_keygen.iter().nth(0).unwrap().generate().unwrap().0;
+
+		// Check key generation
+		for s in sync_keygen {
+			assert!(s.is_ready());
+			assert!(s.generate().is_ok());
+			assert_eq!(s.generate().unwrap().0, compare_to);
+		}
 	}
 }
