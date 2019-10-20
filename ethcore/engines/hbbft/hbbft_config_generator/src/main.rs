@@ -15,7 +15,6 @@ use ethkey::{Address, Generator, KeyPair, Public, Random, Secret};
 use ethstore::{KeyFile, SafeAccount};
 use hbbft::crypto::serde_impl::SerdeSecret;
 use hbbft::sync_key_gen::{AckOutcome, PartOutcome, PublicKey, SecretKey, SyncKeyGen};
-use hbbft::NetworkInfo;
 use rustc_hex::ToHex;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -159,7 +158,7 @@ fn to_toml_array(vec: Vec<&str>) -> Value {
 }
 
 fn to_toml<N>(
-	net_info: &NetworkInfo<N>,
+	keygen: &SyncKeyGen<N, KeyPairWrapper>,
 	enodes_map: &BTreeMap<N, Enode>,
 	i: usize,
 	config_type: &ConfigType,
@@ -172,6 +171,7 @@ where
 	let base_port = 30300i64;
 	let base_rpc_port = 8540i64;
 	let base_ws_port = 9540i64;
+	let generated_keys = keygen.generate().unwrap();
 
 	let mut parity = Map::new();
 	match config_type {
@@ -281,7 +281,7 @@ where
 		mining.insert("engine_signer".into(), Value::String(signer_address));
 
 		// Write the Secret Key Share
-		let wrapper = SerdeSecret(net_info.secret_key_share().unwrap());
+		let wrapper = SerdeSecret(generated_keys.1.unwrap());
 		let sks_serialized = serde_json::to_string(&wrapper).unwrap();
 		mining.insert("hbbft_secret_share".into(), Value::String(sks_serialized));
 
@@ -298,7 +298,7 @@ where
 	}
 
 	// Write the Public Key Set
-	let pks_serialized = serde_json::to_string(net_info.public_key_set()).unwrap();
+	let pks_serialized = serde_json::to_string(&generated_keys.0).unwrap();
 	mining.insert("hbbft_public_key_set".into(), Value::String(pks_serialized));
 
 	mining.insert("force_sealing".into(), Value::Boolean(true));
@@ -393,19 +393,19 @@ fn main() {
 
 	let enodes_map = generate_enodes(num_nodes, external_ip);
 	let mut rng = rand::thread_rng();
-	let net_infos =
-		NetworkInfo::generate_map(enodes_map.keys().cloned().collect::<Vec<_>>(), &mut rng)
-			.expect("NetworkInfo generation expected to succeed");
+
+	let pub_keys = enodes_to_pub_keys(&enodes_map);
+	let sync_keygen = generate_keygens(pub_keys, &mut rng, (num_nodes - 1) / 3);
 
 	let mut reserved_peers = String::new();
-	for (n, info) in net_infos.iter() {
-		let enode = enodes_map.get(n).expect("validator id must be mapped");
+	for keygen in sync_keygen.iter() {
+		let enode = enodes_map.get(keygen.our_id()).expect("validator id must be mapped");
 		writeln!(&mut reserved_peers, "{}", enode.to_string())
 			.expect("enode should be written to the reserved peers string");
 		let i = enode.idx;
 		let file_name = format!("hbbft_validator_{}.toml", i);
 		let toml_string = toml::to_string(&to_toml(
-			info,
+			keygen,
 			&enodes_map,
 			i,
 			&config_type,
@@ -439,11 +439,10 @@ fn main() {
 	}
 	// Write rpc node config
 	let rpc_string = toml::to_string(&to_toml(
-		net_infos
+		sync_keygen
 			.iter()
 			.nth(0)
-			.expect("At least one NetworkInfo entry must exist")
-			.1,
+			.expect("At least one SyncKeyGen entry must exist"),
 		&enodes_map,
 		0,
 		&ConfigType::Rpc,
@@ -473,33 +472,39 @@ mod tests {
 		pub mining: client_traits::HbbftOptions,
 	}
 
-	fn compare<'a, N>(net_info: &NetworkInfo<N>, options: &'a TomlHbbftOptions)
+	fn compare<'a, N>(keygen: &SyncKeyGen<N, KeyPairWrapper>, options: &'a TomlHbbftOptions)
 	where
 		N: hbbft::NodeIdT + Serialize + Deserialize<'a>,
 	{
+		let generated_keys = keygen.generate().unwrap();
+
 		// Parse and compare the Secret Key Share
 		let secret_key_share: SerdeSecret<SecretKeyShare> =
 			serde_json::from_str(&options.mining.hbbft_secret_share).unwrap();
-		assert_eq!(*net_info.secret_key_share().unwrap(), *secret_key_share);
+		assert_eq!(generated_keys.1.unwrap(), *secret_key_share);
 
 		// Parse and compare the Public Key Set
 		let pks: PublicKeySet = serde_json::from_str(&options.mining.hbbft_public_key_set).unwrap();
-		assert_eq!(*net_info.public_key_set(), pks);
+		assert_eq!(generated_keys.0, pks);
 
 		// Parse and compare the Node IDs.
 		let ips: BTreeMap<N, String> =
 			serde_json::from_str(&options.mining.hbbft_validator_ip_addresses).unwrap();
-		assert!(net_info.all_ids().eq(ips.keys()));
+		assert!(keygen.public_keys().keys().eq(ips.keys()));
 	}
 
 	#[test]
 	fn test_network_info_serde() {
+		let num_nodes = 1;
 		let mut rng = rand::thread_rng();
-		let enodes_map = generate_enodes(1, None);
-		let net_infos = NetworkInfo::generate_map(enodes_map.keys().cloned(), &mut rng).unwrap();
-		let net_info = net_infos.iter().nth(0).unwrap().1;
+		let enodes_map = generate_enodes(num_nodes, None);
+
+		let pub_keys = enodes_to_pub_keys(&enodes_map);
+		let sync_keygen = generate_keygens(pub_keys, &mut rng, (num_nodes - 1) / 3);
+
+		let keygen = sync_keygen.iter().nth(0).unwrap();
 		let toml_string = toml::to_string(&to_toml(
-			net_info,
+			keygen,
 			&enodes_map,
 			1,
 			&ConfigType::PosdaoSetup,
@@ -508,7 +513,7 @@ mod tests {
 		))
 		.unwrap();
 		let config: TomlHbbftOptions = toml::from_str(&toml_string).unwrap();
-		compare(net_info, &config);
+		compare(keygen, &config);
 	}
 
 	#[test]
