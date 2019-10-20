@@ -32,6 +32,8 @@ use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
 use crate::sealing::{self, RlpSig, Sealing};
 use crate::NodeId;
 
+use_contract!(key_history_contract, "res/key_history_contract.json");
+
 type HoneyBadger = honey_badger::HoneyBadger<Contribution, NodeId>;
 type Batch = honey_badger::Batch<Contribution, NodeId>;
 type TargetedMessage = hbbft::TargetedMessage<Message, NodeId>;
