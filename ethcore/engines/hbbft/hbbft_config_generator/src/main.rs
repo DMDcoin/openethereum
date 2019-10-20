@@ -8,22 +8,27 @@ extern crate hbbft;
 extern crate rand;
 extern crate rustc_hex;
 extern crate serde;
+extern crate serde_json;
 extern crate toml;
+
+mod keygen_history_helpers;
 
 use clap::{App, Arg};
 use ethkey::{Address, Generator, KeyPair, Public, Random, Secret};
 use ethstore::{KeyFile, SafeAccount};
 use hbbft::crypto::serde_impl::SerdeSecret;
-use hbbft::sync_key_gen::{AckOutcome, PartOutcome, PublicKey, SecretKey, SyncKeyGen};
+use hbbft::sync_key_gen::SyncKeyGen;
+use keygen_history_helpers::{
+	enodes_to_pub_keys, generate_keygens, key_sync_history_data, KeyPairWrapper,
+};
 use rustc_hex::ToHex;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::fs;
-use std::sync::Arc;
 use toml::{map::Map, Value};
 
-fn create_account() -> (Secret, Public, Address) {
+pub fn create_account() -> (Secret, Public, Address) {
 	let acc = Random
 		.generate()
 		.expect("secp context has generation capabilities; qed");
@@ -34,7 +39,7 @@ fn create_account() -> (Secret, Public, Address) {
 	)
 }
 
-struct Enode {
+pub struct Enode {
 	secret: Secret,
 	public: Public,
 	address: Address,
@@ -49,84 +54,6 @@ impl ToString for Enode {
 		let port = 30300usize + self.idx;
 		format!("enode://{:x}@{}:{}", self.public, self.ip, port)
 	}
-}
-
-#[derive(Clone)]
-struct KeyPairWrapper {
-	public: Public,
-	secret: Secret,
-}
-
-impl PublicKey for KeyPairWrapper {
-	type Error = ethkey::crypto::Error;
-	type SecretKey = KeyPairWrapper;
-	fn encrypt<M: AsRef<[u8]>, R: rand::Rng>(
-		&self,
-		msg: M,
-		_rng: &mut R,
-	) -> Result<Vec<u8>, Self::Error> {
-		ethkey::crypto::ecies::encrypt(&self.public, b"", msg.as_ref())
-	}
-}
-
-impl SecretKey for KeyPairWrapper {
-	type Error = ethkey::crypto::Error;
-	fn decrypt(&self, ct: &[u8]) -> Result<Vec<u8>, Self::Error> {
-		ethkey::crypto::ecies::decrypt(&self.secret, b"", ct)
-	}
-}
-
-fn generate_keygens<R: rand::Rng>(
-	key_pairs: Arc<BTreeMap<Public, KeyPairWrapper>>,
-	mut rng: &mut R,
-	t: usize,
-) -> Vec<SyncKeyGen<Public, KeyPairWrapper>> {
-	// Get SyncKeyGen and Parts
-	let (mut sync_keygen, parts): (Vec<_>, Vec<_>) = key_pairs
-		.iter()
-		.map(|(n, kp)| {
-			let s = SyncKeyGen::new(n.clone(), kp.clone(), key_pairs.clone(), t, &mut rng).unwrap();
-			(s.0, (n, s.1.unwrap()))
-		})
-		.unzip();
-
-	// All SyncKeyGen process all parts, returning Acks
-	let acks: Vec<_> = sync_keygen
-		.iter_mut()
-		.flat_map(|s| {
-			parts
-				.iter()
-				.map(|(n, p)| {
-					(
-						s.our_id().clone(),
-						s.handle_part(n, p.clone(), &mut rng).unwrap(),
-					)
-				})
-				.collect::<Vec<_>>()
-		})
-		.collect();
-
-	// All SyncKeyGen process all Acks
-	let ack_outcomes: Vec<_> = sync_keygen
-		.iter_mut()
-		.flat_map(|s| {
-			acks.iter()
-				.map(|(n, p)| match p {
-					PartOutcome::Valid(a) => s.handle_ack(n, a.as_ref().unwrap().clone()).unwrap(),
-					_ => panic!("Expected Part Outcome to be valid"),
-				})
-				.collect::<Vec<_>>()
-		})
-		.collect();
-
-	// Check all Ack Outcomes
-	for ao in ack_outcomes {
-		if let AckOutcome::Invalid(_) = ao {
-			panic!("Expecting Ack Outcome to be valid");
-		}
-	}
-
-	sync_keygen
 }
 
 fn generate_enodes(num_nodes: usize, external_ip: Option<&str>) -> BTreeMap<Public, Enode> {
@@ -340,21 +267,6 @@ arg_enum! {
 	}
 }
 
-fn enodes_to_pub_keys(enodes: &BTreeMap<Public, Enode>) -> Arc<BTreeMap<Public, KeyPairWrapper>> {
-	Arc::new(enodes
-		.iter()
-		.map(|(n, e)| {
-			(
-				n.clone(),
-				KeyPairWrapper {
-					public: e.public,
-					secret: e.secret.clone(),
-				},
-			)
-		})
-		.collect())
-}
-
 fn main() {
 	let matches = App::new("hbbft parity config generator")
 		.version("1.0")
@@ -395,11 +307,13 @@ fn main() {
 	let mut rng = rand::thread_rng();
 
 	let pub_keys = enodes_to_pub_keys(&enodes_map);
-	let sync_keygen = generate_keygens(pub_keys, &mut rng, (num_nodes - 1) / 3);
+	let (sync_keygen, parts, acks) = generate_keygens(pub_keys, &mut rng, (num_nodes - 1) / 3);
 
 	let mut reserved_peers = String::new();
 	for keygen in sync_keygen.iter() {
-		let enode = enodes_map.get(keygen.our_id()).expect("validator id must be mapped");
+		let enode = enodes_map
+			.get(keygen.our_id())
+			.expect("validator id must be mapped");
 		writeln!(&mut reserved_peers, "{}", enode.to_string())
 			.expect("enode should be written to the reserved peers string");
 		let i = enode.idx;
@@ -457,15 +371,20 @@ fn main() {
 
 	// Write the password file
 	fs::write("password.txt", "test").expect("Unable to write password.txt file");
+
+	fs::write("keygen_history.json", key_sync_history_data(parts, acks))
+		.expect("Unable to write keygen history data file");
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use hbbft::crypto::{PublicKeySet, SecretKeyShare};
+	use hbbft::sync_key_gen::{AckOutcome, PartOutcome};
 	use rand;
 	use serde::Deserialize;
 	use std::collections::BTreeMap;
+	use std::sync::Arc;
 
 	#[derive(Deserialize)]
 	struct TomlHbbftOptions {
@@ -500,7 +419,7 @@ mod tests {
 		let enodes_map = generate_enodes(num_nodes, None);
 
 		let pub_keys = enodes_to_pub_keys(&enodes_map);
-		let sync_keygen = generate_keygens(pub_keys, &mut rng, (num_nodes - 1) / 3);
+		let (sync_keygen, _, _) = generate_keygens(pub_keys, &mut rng, (num_nodes - 1) / 3);
 
 		let keygen = sync_keygen.iter().nth(0).unwrap();
 		let toml_string = toml::to_string(&to_toml(
@@ -556,7 +475,7 @@ mod tests {
 		let pub_keys = enodes_to_pub_keys(&enodes);
 		let mut rng = rand::thread_rng();
 
-		let sync_keygen = generate_keygens(pub_keys, &mut rng, t);
+		let (sync_keygen, _, _) = generate_keygens(pub_keys, &mut rng, t);
 
 		let compare_to = sync_keygen.iter().nth(0).unwrap().generate().unwrap().0;
 
