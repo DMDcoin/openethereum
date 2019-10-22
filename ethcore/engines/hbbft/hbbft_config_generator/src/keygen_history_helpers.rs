@@ -1,6 +1,6 @@
 use crate::Enode;
 use ethkey::{Public, Secret};
-use hbbft::sync_key_gen::{Ack, AckOutcome, Part, PartOutcome, PublicKey, SecretKey, SyncKeyGen};
+use hbbft::sync_key_gen::{AckOutcome, Part, PartOutcome, PublicKey, SecretKey, SyncKeyGen};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -108,8 +108,8 @@ pub fn enodes_to_pub_keys(
 
 #[derive(Serialize, Deserialize)]
 struct KeyGenHistoryData {
-	parts: BTreeMap<Public, String>,
-	acks: BTreeMap<Public, Vec<Ack>>,
+	parts: BTreeMap<Public, Vec<u8>>,
+	acks: BTreeMap<Public, Vec<Vec<u8>>>,
 }
 
 pub fn key_sync_history_data(
@@ -123,7 +123,7 @@ pub fn key_sync_history_data(
 	for p in parts {
 		data.parts.insert(
 			p.0,
-			serde_json::to_string(&p.1).expect("Part has to serialize"),
+			bincode::serialize(&p.1).expect("Part has to serialize"),
 		);
 	}
 	for a in acks {
@@ -131,7 +131,8 @@ pub fn key_sync_history_data(
 			PartOutcome::Valid(ack_option) => {
 				if let Some(ack) = ack_option {
 					let v = data.acks.entry(a.0).or_insert(Vec::new());
-					v.push(ack);
+					let ack_serialized = bincode::serialize(&ack).expect("Ack has to serialize");
+					v.push(ack_serialized);
 				} else {
 					panic!("Unexpected valid part outcome without Ack message");
 				}
@@ -145,6 +146,7 @@ pub fn key_sync_history_data(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use bincode;
 
 	#[test]
 	fn test_keygen_history_data_serde() {
@@ -159,9 +161,9 @@ mod tests {
 			.iter()
 			.nth(0)
 			.expect("At least one part needs to exist");
-		let part_serialized = serde_json::to_string(&part.1).expect("Part has to serialize");
-		let part_deserialized: Part =
-			serde_json::from_str(&part_serialized).expect("Deserialization expected to succeed");
-		assert_eq!(part.1, part_deserialized);
+		let part_ser = bincode::serialize(&part.1).expect("Part has to serialize");
+		let part_deser: Part =
+			bincode::deserialize(&part_ser).expect("Deserialization expected to succeed");
+		assert_eq!(part.1, part_deser);
 	}
 }

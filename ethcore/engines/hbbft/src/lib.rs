@@ -1,6 +1,7 @@
 extern crate client_traits;
 extern crate common_types;
 extern crate engine;
+extern crate ethabi;
 #[macro_use]
 extern crate ethabi_contract;
 extern crate ethcore_io as io;
