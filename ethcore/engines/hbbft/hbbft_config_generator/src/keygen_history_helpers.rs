@@ -120,11 +120,17 @@ pub fn key_sync_history_data(
 		parts: BTreeMap::new(),
 		acks: BTreeMap::new(),
 	};
+
+	let mut parts_total_bytes = 0;
+	let mut num_parts = 0;
+	let mut acks_total_bytes = 0;
+	let mut num_acks = 0;
+
 	for p in parts {
-		data.parts.insert(
-			p.0,
-			bincode::serialize(&p.1).expect("Part has to serialize"),
-		);
+		let serialized = bincode::serialize(&p.1).expect("Part has to serialize");
+		parts_total_bytes += serialized.len();
+		num_parts += 1;
+		data.parts.insert(p.0, serialized);
 	}
 	for a in acks {
 		match a.1 {
@@ -132,6 +138,8 @@ pub fn key_sync_history_data(
 				if let Some(ack) = ack_option {
 					let v = data.acks.entry(a.0).or_insert(Vec::new());
 					let ack_serialized = bincode::serialize(&ack).expect("Ack has to serialize");
+					acks_total_bytes += ack_serialized.len();
+					num_acks += 1;
 					v.push(ack_serialized);
 				} else {
 					panic!("Unexpected valid part outcome without Ack message");
@@ -140,6 +148,28 @@ pub fn key_sync_history_data(
 			_ => panic!("Expected Part Outcome to be valid"),
 		}
 	}
+
+	println!(
+		"{} parts, total number of bytes: {}",
+		num_parts, parts_total_bytes
+	);
+	println!(
+		"{} Acks, total number of bytes: {}",
+		num_acks, acks_total_bytes
+	);
+	println!(
+		"Total number of bytes: {}",
+		parts_total_bytes + acks_total_bytes
+	);
+	println!(
+		"{},{},{},{},{}",
+		num_parts,
+		num_acks,
+		parts_total_bytes,
+		acks_total_bytes,
+		parts_total_bytes + acks_total_bytes
+	);
+
 	serde_json::to_string(&data).expect("Keygen History must convert to JSON")
 }
 
