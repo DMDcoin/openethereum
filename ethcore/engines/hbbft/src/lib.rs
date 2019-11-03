@@ -38,6 +38,7 @@ extern crate toml;
 mod contribution;
 mod hbbft_engine;
 mod sealing;
+mod keygen_history;
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
