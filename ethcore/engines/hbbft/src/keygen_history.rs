@@ -1,10 +1,36 @@
+use client_traits::BlockChainClient;
+use common_types::ids::BlockId;
 use engine::signer::EngineSigner;
+use ethabi::FunctionOutputDecoder;
+use ethereum_types::Address;
+use ethkey::Public;
 use hbbft::sync_key_gen::{Error, Part, PubKeyMap, PublicKey, SecretKey, SyncKeyGen};
+use std::str::FromStr;
+
+use_contract!(key_history_contract, "res/key_history_contract.json");
+
+lazy_static! {
+	static ref KEYGEN_HISTORY_ADDRESS: Address =
+		Address::from_str("8000000000000000000000000000000000000000").unwrap();
+}
+
+pub fn part_of_address(client: &dyn BlockChainClient, address: Address) {
+	let (data, decoder) = key_history_contract::functions::parts::call(address);
+	let return_data = client
+		.call_contract(BlockId::Latest, *KEYGEN_HISTORY_ADDRESS, data)
+		.unwrap();
+	if return_data.is_empty() {
+		error!(target: "engine", "A call to KeyGenHistory's 'parts' map returned no data.");
+	} else {
+		let serialized_part = decoder.decode(&return_data).ok();
+		println!("Part for address {}: {:?}", address, serialized_part);
+	}
+}
 
 pub fn engine_signer_to_synckeygen<'a>(
 	signer: &'a Box<dyn EngineSigner>,
-	pub_keys: PubKeyMap<ethkey::Public, KeyPairWrapper<'a>>,
-) -> Result<(SyncKeyGen<ethkey::Public, KeyPairWrapper<'a>>, Option<Part>), Error> {
+	pub_keys: PubKeyMap<Public, KeyPairWrapper<'a>>,
+) -> Result<(SyncKeyGen<Public, KeyPairWrapper<'a>>, Option<Part>), Error> {
 	let wrapper = KeyPairWrapper { inner: signer };
 	let public = signer.public().expect("Signer must be set!");
 	let mut rng = rand::thread_rng();
@@ -33,7 +59,6 @@ impl<'a> SecretKey for KeyPairWrapper<'a> {
 	type Error = ethkey::crypto::Error;
 	fn decrypt(&self, ct: &[u8]) -> Result<Vec<u8>, Self::Error> {
 		self.inner.decrypt(b"", ct)
-		//ethkey::crypto::ecies::decrypt(&self.secret, b"", ct)
 	}
 }
 
@@ -57,7 +82,7 @@ mod tests {
 
 		// Initialize SyncKeyGen with the EngineSigner wrapper
 		let public = signer.public().unwrap();
-		let mut pub_keys: BTreeMap<ethkey::Public, KeyPairWrapper> = BTreeMap::new();
+		let mut pub_keys: BTreeMap<Public, KeyPairWrapper> = BTreeMap::new();
 		pub_keys.insert(public, wrapper.clone());
 
 		assert!(engine_signer_to_synckeygen(&signer, Arc::new(pub_keys)).is_ok());

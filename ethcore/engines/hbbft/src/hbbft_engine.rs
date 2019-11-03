@@ -14,7 +14,8 @@ use common_types::{
 	BlockNumber,
 };
 use engine::{signer::EngineSigner, Engine};
-use ethereum_types::H512;
+use ethabi::FunctionOutputDecoder;
+use ethereum_types::{Address, H512};
 use ethjson::spec::HbbftParams;
 use hbbft::crypto::serde_impl::SerdeSecret;
 use hbbft::crypto::{PublicKey, PublicKeySet, SecretKeyShare};
@@ -27,12 +28,22 @@ use parking_lot::RwLock;
 use rlp::{self, Decodable, Rlp};
 use serde::Deserialize;
 use serde_json;
+use std::str::FromStr;
 
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
+use crate::keygen_history::part_of_address;
 use crate::sealing::{self, RlpSig, Sealing};
 use crate::NodeId;
 
-use_contract!(key_history_contract, "res/key_history_contract.json");
+use_contract!(
+	validator_set_hbbft_mock,
+	"res/validator_set_hbbft_mock.json"
+);
+
+lazy_static! {
+	static ref VALIDATOR_SET_ADDRESS: Address =
+		Address::from_str("9000000000000000000000000000000000000000").unwrap();
+}
 
 type HoneyBadger = honey_badger::HoneyBadger<Contribution, NodeId>;
 type Batch = honey_badger::Batch<Contribution, NodeId>;
@@ -208,6 +219,32 @@ impl HoneyBadgerBFT {
 
 	fn try_init_honey_badger(&self) {
 		let params = if let Some(client) = self.client_arc() {
+			let full_client = match client.as_full_client() {
+				Some(full_client) => full_client,
+				None => {
+					debug!(target: "engine", "Failed to upgrade to BlockchainClient.");
+					return;
+				}
+			};
+
+			let (data, decoder) = validator_set_hbbft_mock::functions::get_validators::call();
+			let return_data =
+				match full_client.call_contract(BlockId::Latest, *VALIDATOR_SET_ADDRESS, data) {
+					Ok(val) => val,
+					Err(_) => {
+						debug!(target: "engine", "Failed to read validators from validator set contract.");
+						return;
+					}
+				};
+
+			if return_data.is_empty() {
+				error!(target: "engine", "The call to get the current set of validators returned no data.");
+			} else {
+				let validators = decoder.decode(&return_data).unwrap();
+				for v in validators {
+					part_of_address(full_client, v);
+				}
+			}
 			// TODO: Retrieve the information to build a node-specific NetworkInfo
 			//       struct from the chain spec and from contracts.
 			client.hbbft_options().expect("hbbft params have to exist")
@@ -227,6 +264,7 @@ impl HoneyBadgerBFT {
 		} else {
 			return; // No engine signer set.
 		};
+
 		if let Some(honey_badger) = self.new_honey_badger(params, our_id) {
 			*self.honey_badger.write() = Some(honey_badger);
 		} else {
