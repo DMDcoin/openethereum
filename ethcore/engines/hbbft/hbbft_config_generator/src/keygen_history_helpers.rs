@@ -1,5 +1,5 @@
 use crate::Enode;
-use ethkey::{Public, Secret};
+use ethkey::{Address, Public, Secret, public_to_address};
 use hbbft::sync_key_gen::{AckOutcome, Part, PartOutcome, PublicKey, SecretKey, SyncKeyGen};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -108,8 +108,8 @@ pub fn enodes_to_pub_keys(
 
 #[derive(Serialize, Deserialize)]
 struct KeyGenHistoryData {
-	parts: BTreeMap<Public, Vec<u8>>,
-	acks: BTreeMap<Public, Vec<Vec<u8>>>,
+	parts: BTreeMap<Address, Vec<u8>>,
+	acks: BTreeMap<Address, Vec<Vec<u8>>>,
 }
 
 pub fn key_sync_history_data(
@@ -130,13 +130,13 @@ pub fn key_sync_history_data(
 		let serialized = bincode::serialize(&p.1).expect("Part has to serialize");
 		parts_total_bytes += serialized.len();
 		num_parts += 1;
-		data.parts.insert(p.0, serialized);
+		data.parts.insert(public_to_address(&p.0), serialized);
 	}
 	for a in acks {
 		match a.1 {
 			PartOutcome::Valid(ack_option) => {
 				if let Some(ack) = ack_option {
-					let v = data.acks.entry(a.0).or_insert(Vec::new());
+					let v = data.acks.entry(public_to_address(&a.0)).or_insert(Vec::new());
 					let ack_serialized = bincode::serialize(&ack).expect("Ack has to serialize");
 					acks_total_bytes += ack_serialized.len();
 					num_acks += 1;
