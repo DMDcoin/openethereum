@@ -13,10 +13,14 @@ use common_types::{
 	transaction::SignedTransaction,
 	BlockNumber,
 };
-use engine::{signer::EngineSigner, Engine};
+use engine::{
+	signer::{from_keypair, EngineSigner},
+	Engine,
+};
 use ethabi::FunctionOutputDecoder;
 use ethereum_types::{Address, H512};
 use ethjson::spec::HbbftParams;
+use ethkey::{KeyPair, Public, Secret};
 use hbbft::crypto::serde_impl::SerdeSecret;
 use hbbft::crypto::{PublicKey, PublicKeySet, SecretKeyShare};
 use hbbft::honey_badger::{self, HoneyBadgerBuilder, Step};
@@ -26,12 +30,13 @@ use itertools::Itertools;
 use machine::{ExecutedBlock, Machine};
 use parking_lot::RwLock;
 use rlp::{self, Decodable, Rlp};
+use rustc_hex::FromHex;
 use serde::Deserialize;
 use serde_json;
 use std::str::FromStr;
 
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
-use crate::keygen_history::part_of_address;
+use crate::keygen_history::{engine_signer_to_synckeygen, part_of_address, KeyPairWrapper};
 use crate::sealing::{self, RlpSig, Sealing};
 use crate::NodeId;
 
@@ -236,6 +241,22 @@ impl HoneyBadgerBFT {
 						return;
 					}
 				};
+
+			// TODO: Set private key corresponding to validator settings as signer in tests
+			let secret = "49c437676c600660905204e5f3710a6db5d3f46e3da9ba5168b9d34b0b787317"
+				.from_hex()
+				.unwrap();
+			let keypair = KeyPair::from_secret(Secret::from_slice(&secret).unwrap())
+				.expect("KeyPair generation must succeed");
+			let signer: Box<dyn EngineSigner> = from_keypair(keypair);
+			let wrapper = KeyPairWrapper { inner: &signer };
+
+			// TODO: Get public keys from validator contract.
+			let public = signer.public().unwrap();
+			let mut pub_keys: BTreeMap<Public, KeyPairWrapper> = BTreeMap::new();
+			pub_keys.insert(public, wrapper.clone());
+
+			let _synckeygen = engine_signer_to_synckeygen(&signer, Arc::new(pub_keys));
 
 			if return_data.is_empty() {
 				error!(target: "engine", "The call to get the current set of validators returned no data.");

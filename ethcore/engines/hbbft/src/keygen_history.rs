@@ -67,13 +67,17 @@ mod tests {
 	use super::*;
 	use engine::signer::{from_keypair, EngineSigner};
 	use ethkey::{KeyPair, Secret};
+	use rustc_hex::FromHex;
 	use std::collections::BTreeMap;
 	use std::sync::Arc;
 
 	#[test]
 	fn test_synckeygen_initialization() {
 		// Create a keypair
-		let keypair = KeyPair::from_secret(Secret::from_slice(&[3u8; 32]).unwrap())
+		let secret = "49c437676c600660905204e5f3710a6db5d3f46e3da9ba5168b9d34b0b787317"
+			.from_hex()
+			.unwrap();
+		let keypair = KeyPair::from_secret(Secret::from_slice(&secret).unwrap())
 			.expect("KeyPair generation must succeed");
 
 		// Convert it to a EngineSigner trait object
