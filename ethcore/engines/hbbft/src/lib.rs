@@ -42,6 +42,7 @@ mod contribution;
 mod hbbft_engine;
 mod sealing;
 mod keygen_history;
+mod validator_set;
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
