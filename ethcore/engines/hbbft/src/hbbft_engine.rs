@@ -17,8 +17,7 @@ use engine::{
 	signer::{from_keypair, EngineSigner},
 	Engine,
 };
-use ethabi::FunctionOutputDecoder;
-use ethereum_types::{Address, H512};
+use ethereum_types::H512;
 use ethjson::spec::HbbftParams;
 use ethkey::{KeyPair, Public, Secret};
 use hbbft::crypto::serde_impl::SerdeSecret;
@@ -33,24 +32,14 @@ use rlp::{self, Decodable, Rlp};
 use rustc_hex::FromHex;
 use serde::Deserialize;
 use serde_json;
-use std::str::FromStr;
 
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
 use crate::keygen_history::{
 	acks_of_address, engine_signer_to_synckeygen, part_of_address, KeyPairWrapper,
 };
 use crate::sealing::{self, RlpSig, Sealing};
+use crate::validator_set::get_validator_map;
 use crate::NodeId;
-
-use_contract!(
-	validator_set_hbbft_mock,
-	"res/validator_set_hbbft_mock.json"
-);
-
-lazy_static! {
-	static ref VALIDATOR_SET_ADDRESS: Address =
-		Address::from_str("9000000000000000000000000000000000000000").unwrap();
-}
 
 type HoneyBadger = honey_badger::HoneyBadger<Contribution, NodeId>;
 type Batch = honey_badger::Batch<Contribution, NodeId>;
@@ -243,36 +232,30 @@ impl HoneyBadgerBFT {
 			let signer: Box<dyn EngineSigner> = from_keypair(keypair);
 			let wrapper = KeyPairWrapper { inner: &signer };
 
-			// TODO: Get public keys from validator contract.
+			let vmap = match get_validator_map(full_client) {
+				Ok(vmap) => vmap,
+				Err(_) => {
+					error!(target: "engine", "Map of validator-associated data could not be obtained.");
+					return;
+				}
+			};
+
+			// TODO: Use public keys from validator contract.
 			let public = signer.public().unwrap();
 			let mut pub_keys: BTreeMap<Public, KeyPairWrapper> = BTreeMap::new();
 			pub_keys.insert(public, wrapper.clone());
 
 			let mut synckeygen = match engine_signer_to_synckeygen(&signer, Arc::new(pub_keys)) {
 				Ok((skg, _)) => skg,
-				Err(_) => return
+				Err(_) => return,
 			};
 
-			let (data, decoder) = validator_set_hbbft_mock::functions::get_validators::call();
-			let return_data =
-				match full_client.call_contract(BlockId::Latest, *VALIDATOR_SET_ADDRESS, data) {
-					Ok(val) => val,
-					Err(_) => {
-						debug!(target: "engine", "Failed to read validators from validator set contract.");
-						return;
-					}
-				};
-
-			if return_data.is_empty() {
-				error!(target: "engine", "The call to get the current set of validators returned no data.");
-			} else {
-				let validators = decoder.decode(&return_data).unwrap();
-				for v in validators {
-					part_of_address(full_client, v, public, &mut synckeygen);
-					acks_of_address(full_client, v, public, &mut synckeygen);
-				}
+			for v in vmap.keys() {
+				part_of_address(full_client, *v, public, &mut synckeygen);
+				acks_of_address(full_client, *v, public, &mut synckeygen);
 				assert!(synckeygen.is_ready());
 			}
+
 			// TODO: Retrieve the information to build a node-specific NetworkInfo
 			//       struct from the chain spec and from contracts.
 			client.hbbft_options().expect("hbbft params have to exist")

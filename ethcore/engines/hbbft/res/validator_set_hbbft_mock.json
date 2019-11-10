@@ -37,32 +37,6 @@
     "type": "function"
   },
   {
-    "constant": false,
-    "inputs": [
-      {
-        "name": "_blockRewardContract",
-        "type": "address"
-      },
-      {
-        "name": "_initialMiningAddresses",
-        "type": "address[]"
-      },
-      {
-        "name": "_initialStakingAddresses",
-        "type": "address[]"
-      },
-      {
-        "name": "_firstValidatorIsUnremovable",
-        "type": "bool"
-      }
-    ],
-    "name": "initialize",
-    "outputs": [],
-    "payable": false,
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "constant": true,
     "inputs": [],
     "name": "isInitialized",
@@ -88,6 +62,15 @@
     ],
     "payable": false,
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "constant": false,
+    "inputs": [],
+    "name": "newValidatorSet",
+    "outputs": [],
+    "payable": false,
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -139,6 +122,63 @@
     ],
     "payable": false,
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "constant": true,
+    "inputs": [
+      {
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "validatorPubkeys",
+    "outputs": [
+      {
+        "name": "pubkey_high",
+        "type": "bytes32"
+      },
+      {
+        "name": "pubkey_low",
+        "type": "bytes32"
+      }
+    ],
+    "payable": false,
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "constant": false,
+    "inputs": [
+      {
+        "name": "_blockRewardContract",
+        "type": "address"
+      },
+      {
+        "name": "_randomContract",
+        "type": "address"
+      },
+      {
+        "name": "_stakingContract",
+        "type": "address"
+      },
+      {
+        "name": "_initialMiningAddresses",
+        "type": "address[]"
+      },
+      {
+        "name": "_initialStakingAddresses",
+        "type": "address[]"
+      },
+      {
+        "name": "_firstValidatorIsUnremovable",
+        "type": "bool"
+      }
+    ],
+    "name": "initialize",
+    "outputs": [],
+    "payable": false,
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -210,6 +250,48 @@
   {
     "constant": true,
     "inputs": [],
+    "name": "randomContract",
+    "outputs": [
+      {
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "payable": false,
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "constant": true,
+    "inputs": [],
+    "name": "changeRequestCount",
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "payable": false,
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "constant": true,
+    "inputs": [],
+    "name": "stakingContract",
+    "outputs": [
+      {
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "payable": false,
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "constant": true,
+    "inputs": [],
     "name": "getPendingValidators",
     "outputs": [
       {
@@ -239,16 +321,5 @@
     "payable": false,
     "stateMutability": "view",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "name": "_validators",
-        "type": "address[]"
-      }
-    ],
-    "payable": false,
-    "stateMutability": "nonpayable",
-    "type": "constructor"
   }
 ]

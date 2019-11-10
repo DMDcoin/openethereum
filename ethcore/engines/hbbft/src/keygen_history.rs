@@ -25,7 +25,12 @@ pub fn engine_signer_to_synckeygen<'a>(
 	SyncKeyGen::new(public, wrapper, pub_keys, (num_nodes - 1) / 3, &mut rng)
 }
 
-pub fn part_of_address(client: &dyn BlockChainClient, address: Address, p: Public, skg: &mut SyncKeyGen<Public, KeyPairWrapper<'_>>) {
+pub fn part_of_address(
+	client: &dyn BlockChainClient,
+	address: Address,
+	p: Public,
+	skg: &mut SyncKeyGen<Public, KeyPairWrapper<'_>>,
+) {
 	let (data, decoder) = key_history_contract::functions::parts::call(address);
 	let return_data = client
 		.call_contract(BlockId::Latest, *KEYGEN_HISTORY_ADDRESS, data)
@@ -41,7 +46,12 @@ pub fn part_of_address(client: &dyn BlockChainClient, address: Address, p: Publi
 	}
 }
 
-pub fn acks_of_address(client: &dyn BlockChainClient, address: Address, p: Public, skg: &mut SyncKeyGen<Public, KeyPairWrapper<'_>>) {
+pub fn acks_of_address(
+	client: &dyn BlockChainClient,
+	address: Address,
+	p: Public,
+	skg: &mut SyncKeyGen<Public, KeyPairWrapper<'_>>,
+) {
 	let (data, decoder) = key_history_contract::functions::get_acks_length::call(address);
 	let return_data = client
 		.call_contract(BlockId::Latest, *KEYGEN_HISTORY_ADDRESS, data)
@@ -50,7 +60,10 @@ pub fn acks_of_address(client: &dyn BlockChainClient, address: Address, p: Publi
 		error!(target: "engine", "A call to KeyGenHistory's 'acks' map returned no data.");
 	} else {
 		let serialized_length = decoder.decode(&return_data).unwrap();
-		println!("Acks for address {} is of size: {:?}", address, serialized_length);
+		println!(
+			"Acks for address {} is of size: {:?}",
+			address, serialized_length
+		);
 		for n in 0..serialized_length.low_u64() {
 			let (data, decoder) = key_history_contract::functions::acks::call(address, n);
 			let return_data = client
