@@ -36,7 +36,9 @@ use serde_json;
 use std::str::FromStr;
 
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
-use crate::keygen_history::{engine_signer_to_synckeygen, part_of_address, KeyPairWrapper};
+use crate::keygen_history::{
+	acks_of_address, engine_signer_to_synckeygen, part_of_address, KeyPairWrapper,
+};
 use crate::sealing::{self, RlpSig, Sealing};
 use crate::NodeId;
 
@@ -232,16 +234,6 @@ impl HoneyBadgerBFT {
 				}
 			};
 
-			let (data, decoder) = validator_set_hbbft_mock::functions::get_validators::call();
-			let return_data =
-				match full_client.call_contract(BlockId::Latest, *VALIDATOR_SET_ADDRESS, data) {
-					Ok(val) => val,
-					Err(_) => {
-						debug!(target: "engine", "Failed to read validators from validator set contract.");
-						return;
-					}
-				};
-
 			// TODO: Set private key corresponding to validator settings as signer in tests
 			let secret = "49c437676c600660905204e5f3710a6db5d3f46e3da9ba5168b9d34b0b787317"
 				.from_hex()
@@ -256,15 +248,30 @@ impl HoneyBadgerBFT {
 			let mut pub_keys: BTreeMap<Public, KeyPairWrapper> = BTreeMap::new();
 			pub_keys.insert(public, wrapper.clone());
 
-			let _synckeygen = engine_signer_to_synckeygen(&signer, Arc::new(pub_keys));
+			let mut synckeygen = match engine_signer_to_synckeygen(&signer, Arc::new(pub_keys)) {
+				Ok((skg, _)) => skg,
+				Err(_) => return
+			};
+
+			let (data, decoder) = validator_set_hbbft_mock::functions::get_validators::call();
+			let return_data =
+				match full_client.call_contract(BlockId::Latest, *VALIDATOR_SET_ADDRESS, data) {
+					Ok(val) => val,
+					Err(_) => {
+						debug!(target: "engine", "Failed to read validators from validator set contract.");
+						return;
+					}
+				};
 
 			if return_data.is_empty() {
 				error!(target: "engine", "The call to get the current set of validators returned no data.");
 			} else {
 				let validators = decoder.decode(&return_data).unwrap();
 				for v in validators {
-					part_of_address(full_client, v);
+					part_of_address(full_client, v, public, &mut synckeygen);
+					acks_of_address(full_client, v, public, &mut synckeygen);
 				}
+				assert!(synckeygen.is_ready());
 			}
 			// TODO: Retrieve the information to build a node-specific NetworkInfo
 			//       struct from the chain spec and from contracts.

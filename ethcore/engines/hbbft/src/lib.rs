@@ -1,3 +1,4 @@
+extern crate bincode;
 extern crate client_traits;
 extern crate common_types;
 extern crate engine;

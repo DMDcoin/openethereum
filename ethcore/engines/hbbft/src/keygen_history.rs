@@ -4,7 +4,7 @@ use engine::signer::EngineSigner;
 use ethabi::FunctionOutputDecoder;
 use ethereum_types::Address;
 use ethkey::Public;
-use hbbft::sync_key_gen::{Error, Part, PubKeyMap, PublicKey, SecretKey, SyncKeyGen};
+use hbbft::sync_key_gen::{Ack, Error, Part, PubKeyMap, PublicKey, SecretKey, SyncKeyGen};
 use std::str::FromStr;
 
 use_contract!(key_history_contract, "res/key_history_contract.json");
@@ -14,19 +14,6 @@ lazy_static! {
 		Address::from_str("8000000000000000000000000000000000000000").unwrap();
 }
 
-pub fn part_of_address(client: &dyn BlockChainClient, address: Address) {
-	let (data, decoder) = key_history_contract::functions::parts::call(address);
-	let return_data = client
-		.call_contract(BlockId::Latest, *KEYGEN_HISTORY_ADDRESS, data)
-		.unwrap();
-	if return_data.is_empty() {
-		error!(target: "engine", "A call to KeyGenHistory's 'parts' map returned no data.");
-	} else {
-		let serialized_part = decoder.decode(&return_data).ok();
-		println!("Part for address {}: {:?}", address, serialized_part);
-	}
-}
-
 pub fn engine_signer_to_synckeygen<'a>(
 	signer: &'a Box<dyn EngineSigner>,
 	pub_keys: PubKeyMap<Public, KeyPairWrapper<'a>>,
@@ -34,7 +21,51 @@ pub fn engine_signer_to_synckeygen<'a>(
 	let wrapper = KeyPairWrapper { inner: signer };
 	let public = signer.public().expect("Signer must be set!");
 	let mut rng = rand::thread_rng();
-	SyncKeyGen::new(public, wrapper, pub_keys, 0, &mut rng)
+	let num_nodes = pub_keys.len();
+	SyncKeyGen::new(public, wrapper, pub_keys, (num_nodes - 1) / 3, &mut rng)
+}
+
+pub fn part_of_address(client: &dyn BlockChainClient, address: Address, p: Public, skg: &mut SyncKeyGen<Public, KeyPairWrapper<'_>>) {
+	let (data, decoder) = key_history_contract::functions::parts::call(address);
+	let return_data = client
+		.call_contract(BlockId::Latest, *KEYGEN_HISTORY_ADDRESS, data)
+		.unwrap();
+	if return_data.is_empty() {
+		error!(target: "engine", "A call to KeyGenHistory's 'parts' map returned no data.");
+	} else {
+		let serialized_part = decoder.decode(&return_data).unwrap();
+		println!("Part for address {}: {:?}", address, serialized_part);
+		let deserialized_part: Part = bincode::deserialize(&serialized_part).unwrap();
+		let mut rng = rand::thread_rng();
+		skg.handle_part(&p, deserialized_part, &mut rng).unwrap();
+	}
+}
+
+pub fn acks_of_address(client: &dyn BlockChainClient, address: Address, p: Public, skg: &mut SyncKeyGen<Public, KeyPairWrapper<'_>>) {
+	let (data, decoder) = key_history_contract::functions::get_acks_length::call(address);
+	let return_data = client
+		.call_contract(BlockId::Latest, *KEYGEN_HISTORY_ADDRESS, data)
+		.unwrap();
+	if return_data.is_empty() {
+		error!(target: "engine", "A call to KeyGenHistory's 'acks' map returned no data.");
+	} else {
+		let serialized_length = decoder.decode(&return_data).unwrap();
+		println!("Acks for address {} is of size: {:?}", address, serialized_length);
+		for n in 0..serialized_length.low_u64() {
+			let (data, decoder) = key_history_contract::functions::acks::call(address, n);
+			let return_data = client
+				.call_contract(BlockId::Latest, *KEYGEN_HISTORY_ADDRESS, data)
+				.unwrap();
+			if return_data.is_empty() {
+				error!(target: "engine", "A call to KeyGenHistory's 'acks' map returned no data.");
+			} else {
+				let serialized_ack = decoder.decode(&return_data).unwrap();
+				println!("Ack #{} for address {}: {:?}", n, address, serialized_ack);
+				let deserialized_ack: Ack = bincode::deserialize(&serialized_ack).unwrap();
+				skg.handle_ack(&p, deserialized_ack).unwrap();
+			}
+		}
+	}
 }
 
 #[derive(Clone)]
