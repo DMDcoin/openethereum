@@ -18,9 +18,11 @@ lazy_static! {
 
 pub fn engine_signer_to_synckeygen<'a>(
 	signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
-	pub_keys: PubKeyMap<Public, KeyPairWrapper>,
-) -> Result<(SyncKeyGen<Public, KeyPairWrapper>, Option<Part>), Error> {
-	let wrapper = KeyPairWrapper { inner: signer.clone() };
+	pub_keys: PubKeyMap<Public, PublicWrapper>,
+) -> Result<(SyncKeyGen<Public, PublicWrapper>, Option<Part>), Error> {
+	let wrapper = KeyPairWrapper {
+		inner: signer.clone(),
+	};
 	let public = signer
 		.read()
 		.as_ref()
@@ -36,7 +38,7 @@ pub fn part_of_address(
 	client: &dyn BlockChainClient,
 	address: Address,
 	p: Public,
-	skg: &mut SyncKeyGen<Public, KeyPairWrapper>,
+	skg: &mut SyncKeyGen<Public, PublicWrapper>,
 ) {
 	let (data, decoder) = key_history_contract::functions::parts::call(address);
 	let return_data = client
@@ -57,7 +59,7 @@ pub fn acks_of_address(
 	client: &dyn BlockChainClient,
 	address: Address,
 	p: Public,
-	skg: &mut SyncKeyGen<Public, KeyPairWrapper>,
+	skg: &mut SyncKeyGen<Public, PublicWrapper>,
 ) {
 	let (data, decoder) = key_history_contract::functions::get_acks_length::call(address);
 	let return_data = client
@@ -89,11 +91,16 @@ pub fn acks_of_address(
 }
 
 #[derive(Clone)]
+pub struct PublicWrapper {
+	pub inner: Public,
+}
+
+#[derive(Clone)]
 pub struct KeyPairWrapper {
 	pub inner: Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 }
 
-impl<'a> PublicKey for KeyPairWrapper {
+impl<'a> PublicKey for PublicWrapper {
 	type Error = ethkey::crypto::Error;
 	type SecretKey = KeyPairWrapper;
 	fn encrypt<M: AsRef<[u8]>, R: rand::Rng>(
@@ -101,14 +108,7 @@ impl<'a> PublicKey for KeyPairWrapper {
 		msg: M,
 		_rng: &mut R,
 	) -> Result<Vec<u8>, Self::Error> {
-		let public = self
-			.inner
-			.read()
-			.as_ref()
-			.expect("Signer must be set!")
-			.public()
-			.expect("Engine Signer public key must be available!");
-		ethkey::crypto::ecies::encrypt(&public, b"", msg.as_ref())
+		ethkey::crypto::ecies::encrypt(&self.inner, b"", msg.as_ref())
 	}
 }
 
@@ -140,15 +140,18 @@ mod tests {
 			.unwrap();
 		let keypair = KeyPair::from_secret(Secret::from_slice(&secret).unwrap())
 			.expect("KeyPair generation must succeed");
+		let public = keypair.public().clone();
+		let wrapper = PublicWrapper {
+			inner: public.clone(),
+		};
 
 		// Convert it to a EngineSigner trait object
-		let signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>> = Arc::new(RwLock::new(Some(from_keypair(keypair))));
-		let wrapper = KeyPairWrapper { inner: signer.clone() };
+		let signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>> =
+			Arc::new(RwLock::new(Some(from_keypair(keypair))));
 
 		// Initialize SyncKeyGen with the EngineSigner wrapper
-		let public = signer.read().as_ref().unwrap().public().unwrap();
-		let mut pub_keys: BTreeMap<Public, KeyPairWrapper> = BTreeMap::new();
-		pub_keys.insert(public, wrapper.clone());
+		let mut pub_keys: BTreeMap<Public, PublicWrapper> = BTreeMap::new();
+		pub_keys.insert(public, wrapper);
 
 		assert!(engine_signer_to_synckeygen(signer, Arc::new(pub_keys)).is_ok());
 	}

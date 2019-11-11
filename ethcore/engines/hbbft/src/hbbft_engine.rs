@@ -35,7 +35,7 @@ use serde_json;
 
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
 use crate::keygen_history::{
-	acks_of_address, engine_signer_to_synckeygen, part_of_address, KeyPairWrapper,
+	acks_of_address, engine_signer_to_synckeygen, part_of_address, PublicWrapper,
 };
 use crate::sealing::{self, RlpSig, Sealing};
 use crate::validator_set::get_validator_map;
@@ -229,8 +229,8 @@ impl HoneyBadgerBFT {
 				.unwrap();
 			let keypair = KeyPair::from_secret(Secret::from_slice(&secret).unwrap())
 				.expect("KeyPair generation must succeed");
-			let signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>> = Arc::new(RwLock::new(Some(from_keypair(keypair))));
-			let wrapper = KeyPairWrapper { inner: signer.clone() };
+			let signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>> =
+				Arc::new(RwLock::new(Some(from_keypair(keypair))));
 
 			let vmap = match get_validator_map(full_client) {
 				Ok(vmap) => vmap,
@@ -241,10 +241,18 @@ impl HoneyBadgerBFT {
 			};
 
 			// TODO: Use public keys from validator contract.
-			let public = signer.read().as_ref().expect("Signer must be set!").public().unwrap();
+			let public = signer
+				.read()
+				.as_ref()
+				.expect("Signer must be set!")
+				.public()
+				.unwrap();
+			let public_wrapper = PublicWrapper {
+				inner: public.clone(),
+			};
 
-			let mut pub_keys: BTreeMap<Public, KeyPairWrapper> = BTreeMap::new();
-			pub_keys.insert(public, wrapper.clone());
+			let mut pub_keys: BTreeMap<Public, PublicWrapper> = BTreeMap::new();
+			pub_keys.insert(public, public_wrapper);
 
 			let mut synckeygen = match engine_signer_to_synckeygen(signer, Arc::new(pub_keys)) {
 				Ok((skg, _)) => skg,
