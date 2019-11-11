@@ -58,7 +58,7 @@ enum Message {
 pub struct HoneyBadgerBFT {
 	transition_service: IoService<()>,
 	client: Arc<RwLock<Option<Weak<dyn EngineClient>>>>,
-	signer: RwLock<Option<Box<dyn EngineSigner>>>,
+	signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 	machine: Machine,
 	network_info: RwLock<Option<NetworkInfo<NodeId>>>,
 	honey_badger: RwLock<Option<HoneyBadger>>,
@@ -165,7 +165,7 @@ impl HoneyBadgerBFT {
 		let engine = Arc::new(HoneyBadgerBFT {
 			transition_service: IoService::<()>::start().map_err(|err| Box::new(err.into()))?,
 			client: Arc::new(RwLock::new(None)),
-			signer: RwLock::new(None),
+			signer: Arc::new(RwLock::new(None)),
 			machine,
 			network_info: RwLock::new(None),
 			honey_badger: RwLock::new(None),
@@ -229,8 +229,8 @@ impl HoneyBadgerBFT {
 				.unwrap();
 			let keypair = KeyPair::from_secret(Secret::from_slice(&secret).unwrap())
 				.expect("KeyPair generation must succeed");
-			let signer: Box<dyn EngineSigner> = from_keypair(keypair);
-			let wrapper = KeyPairWrapper { inner: &signer };
+			let signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>> = Arc::new(RwLock::new(Some(from_keypair(keypair))));
+			let wrapper = KeyPairWrapper { inner: signer.clone() };
 
 			let vmap = match get_validator_map(full_client) {
 				Ok(vmap) => vmap,
@@ -241,11 +241,12 @@ impl HoneyBadgerBFT {
 			};
 
 			// TODO: Use public keys from validator contract.
-			let public = signer.public().unwrap();
+			let public = signer.read().as_ref().expect("Signer must be set!").public().unwrap();
+
 			let mut pub_keys: BTreeMap<Public, KeyPairWrapper> = BTreeMap::new();
 			pub_keys.insert(public, wrapper.clone());
 
-			let mut synckeygen = match engine_signer_to_synckeygen(&signer, Arc::new(pub_keys)) {
+			let mut synckeygen = match engine_signer_to_synckeygen(signer, Arc::new(pub_keys)) {
 				Ok((skg, _)) => skg,
 				Err(_) => return,
 			};

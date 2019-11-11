@@ -5,7 +5,9 @@ use ethabi::FunctionOutputDecoder;
 use ethereum_types::Address;
 use ethkey::Public;
 use hbbft::sync_key_gen::{Ack, Error, Part, PubKeyMap, PublicKey, SecretKey, SyncKeyGen};
+use parking_lot::RwLock;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use_contract!(key_history_contract, "res/key_history_contract.json");
 
@@ -15,11 +17,16 @@ lazy_static! {
 }
 
 pub fn engine_signer_to_synckeygen<'a>(
-	signer: &'a Box<dyn EngineSigner>,
-	pub_keys: PubKeyMap<Public, KeyPairWrapper<'a>>,
-) -> Result<(SyncKeyGen<Public, KeyPairWrapper<'a>>, Option<Part>), Error> {
-	let wrapper = KeyPairWrapper { inner: signer };
-	let public = signer.public().expect("Signer must be set!");
+	signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
+	pub_keys: PubKeyMap<Public, KeyPairWrapper>,
+) -> Result<(SyncKeyGen<Public, KeyPairWrapper>, Option<Part>), Error> {
+	let wrapper = KeyPairWrapper { inner: signer.clone() };
+	let public = signer
+		.read()
+		.as_ref()
+		.expect("Signer must be set!")
+		.public()
+		.expect("Signer's public key must be available!");
 	let mut rng = rand::thread_rng();
 	let num_nodes = pub_keys.len();
 	SyncKeyGen::new(public, wrapper, pub_keys, (num_nodes - 1) / 3, &mut rng)
@@ -29,7 +36,7 @@ pub fn part_of_address(
 	client: &dyn BlockChainClient,
 	address: Address,
 	p: Public,
-	skg: &mut SyncKeyGen<Public, KeyPairWrapper<'_>>,
+	skg: &mut SyncKeyGen<Public, KeyPairWrapper>,
 ) {
 	let (data, decoder) = key_history_contract::functions::parts::call(address);
 	let return_data = client
@@ -50,7 +57,7 @@ pub fn acks_of_address(
 	client: &dyn BlockChainClient,
 	address: Address,
 	p: Public,
-	skg: &mut SyncKeyGen<Public, KeyPairWrapper<'_>>,
+	skg: &mut SyncKeyGen<Public, KeyPairWrapper>,
 ) {
 	let (data, decoder) = key_history_contract::functions::get_acks_length::call(address);
 	let return_data = client
@@ -82,27 +89,37 @@ pub fn acks_of_address(
 }
 
 #[derive(Clone)]
-pub struct KeyPairWrapper<'a> {
-	pub inner: &'a Box<dyn EngineSigner>,
+pub struct KeyPairWrapper {
+	pub inner: Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 }
 
-impl<'a> PublicKey for KeyPairWrapper<'a> {
+impl<'a> PublicKey for KeyPairWrapper {
 	type Error = ethkey::crypto::Error;
-	type SecretKey = KeyPairWrapper<'a>;
+	type SecretKey = KeyPairWrapper;
 	fn encrypt<M: AsRef<[u8]>, R: rand::Rng>(
 		&self,
 		msg: M,
 		_rng: &mut R,
 	) -> Result<Vec<u8>, Self::Error> {
-		let public = self.inner.public().expect("Engine Signer must be set");
+		let public = self
+			.inner
+			.read()
+			.as_ref()
+			.expect("Signer must be set!")
+			.public()
+			.expect("Engine Signer public key must be available!");
 		ethkey::crypto::ecies::encrypt(&public, b"", msg.as_ref())
 	}
 }
 
-impl<'a> SecretKey for KeyPairWrapper<'a> {
+impl<'a> SecretKey for KeyPairWrapper {
 	type Error = ethkey::crypto::Error;
 	fn decrypt(&self, ct: &[u8]) -> Result<Vec<u8>, Self::Error> {
-		self.inner.decrypt(b"", ct)
+		self.inner
+			.read()
+			.as_ref()
+			.expect("Signer must be set!")
+			.decrypt(b"", ct)
 	}
 }
 
@@ -125,14 +142,14 @@ mod tests {
 			.expect("KeyPair generation must succeed");
 
 		// Convert it to a EngineSigner trait object
-		let signer: Box<dyn EngineSigner> = from_keypair(keypair);
-		let wrapper = KeyPairWrapper { inner: &signer };
+		let signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>> = Arc::new(RwLock::new(Some(from_keypair(keypair))));
+		let wrapper = KeyPairWrapper { inner: signer.clone() };
 
 		// Initialize SyncKeyGen with the EngineSigner wrapper
-		let public = signer.public().unwrap();
+		let public = signer.read().as_ref().unwrap().public().unwrap();
 		let mut pub_keys: BTreeMap<Public, KeyPairWrapper> = BTreeMap::new();
 		pub_keys.insert(public, wrapper.clone());
 
-		assert!(engine_signer_to_synckeygen(&signer, Arc::new(pub_keys)).is_ok());
+		assert!(engine_signer_to_synckeygen(signer, Arc::new(pub_keys)).is_ok());
 	}
 }
