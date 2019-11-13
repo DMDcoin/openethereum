@@ -232,7 +232,7 @@ impl HoneyBadgerBFT {
 			let signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>> =
 				Arc::new(RwLock::new(Some(from_keypair(keypair))));
 
-			let vmap = match get_validator_map(full_client) {
+			let vmap = match get_validator_map(&*client) {
 				Ok(vmap) => vmap,
 				Err(_) => {
 					error!(target: "engine", "Map of validator-associated data could not be obtained.");
