@@ -1,19 +1,25 @@
-use client_traits::BlockChainClient;
+use client_traits::EngineClient;
 use common_types::ids::BlockId;
 use engine::signer::EngineSigner;
-use ethabi::FunctionOutputDecoder;
 use ethereum_types::Address;
 use ethkey::Public;
 use hbbft::sync_key_gen::{Ack, Error, Part, PubKeyMap, PublicKey, SecretKey, SyncKeyGen};
 use parking_lot::RwLock;
 use std::str::FromStr;
 use std::sync::Arc;
+use util::CallError;
 
 use_contract!(key_history_contract, "res/key_history_contract.json");
 
 lazy_static! {
 	static ref KEYGEN_HISTORY_ADDRESS: Address =
 		Address::from_str("8000000000000000000000000000000000000000").unwrap();
+}
+
+macro_rules! call_const_key_history {
+	($c:ident, $x:ident $(, $a:expr )*) => {
+		$c.call_const(key_history_contract::functions::$x::call($($a),*))
+	};
 }
 
 pub fn engine_signer_to_synckeygen<'a>(
@@ -35,59 +41,42 @@ pub fn engine_signer_to_synckeygen<'a>(
 }
 
 pub fn part_of_address(
-	client: &dyn BlockChainClient,
+	client: &dyn EngineClient,
 	address: Address,
 	p: Public,
 	skg: &mut SyncKeyGen<Public, PublicWrapper>,
-) {
-	let (data, decoder) = key_history_contract::functions::parts::call(address);
-	let return_data = client
-		.call_contract(BlockId::Latest, *KEYGEN_HISTORY_ADDRESS, data)
-		.unwrap();
-	if return_data.is_empty() {
-		error!(target: "engine", "A call to KeyGenHistory's 'parts' map returned no data.");
-	} else {
-		let serialized_part = decoder.decode(&return_data).unwrap();
-		println!("Part for address {}: {:?}", address, serialized_part);
-		let deserialized_part: Part = bincode::deserialize(&serialized_part).unwrap();
-		let mut rng = rand::thread_rng();
-		skg.handle_part(&p, deserialized_part, &mut rng).unwrap();
-	}
+) -> Result<(), CallError> {
+	let c = crate::util::BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
+	let serialized_part = call_const_key_history!(c, parts, address)?;
+	println!("Part for address {}: {:?}", address, serialized_part);
+	let deserialized_part: Part = bincode::deserialize(&serialized_part).unwrap();
+	let mut rng = rand::thread_rng();
+	skg.handle_part(&p, deserialized_part, &mut rng).unwrap();
+
+	Ok(())
 }
 
 pub fn acks_of_address(
-	client: &dyn BlockChainClient,
+	client: &dyn EngineClient,
 	address: Address,
 	p: Public,
 	skg: &mut SyncKeyGen<Public, PublicWrapper>,
-) {
-	let (data, decoder) = key_history_contract::functions::get_acks_length::call(address);
-	let return_data = client
-		.call_contract(BlockId::Latest, *KEYGEN_HISTORY_ADDRESS, data)
-		.unwrap();
-	if return_data.is_empty() {
-		error!(target: "engine", "A call to KeyGenHistory's 'acks' map returned no data.");
-	} else {
-		let serialized_length = decoder.decode(&return_data).unwrap();
-		println!(
-			"Acks for address {} is of size: {:?}",
-			address, serialized_length
-		);
-		for n in 0..serialized_length.low_u64() {
-			let (data, decoder) = key_history_contract::functions::acks::call(address, n);
-			let return_data = client
-				.call_contract(BlockId::Latest, *KEYGEN_HISTORY_ADDRESS, data)
-				.unwrap();
-			if return_data.is_empty() {
-				error!(target: "engine", "A call to KeyGenHistory's 'acks' map returned no data.");
-			} else {
-				let serialized_ack = decoder.decode(&return_data).unwrap();
-				println!("Ack #{} for address {}: {:?}", n, address, serialized_ack);
-				let deserialized_ack: Ack = bincode::deserialize(&serialized_ack).unwrap();
-				skg.handle_ack(&p, deserialized_ack).unwrap();
-			}
-		}
+) -> Result<(), CallError> {
+	let c = crate::util::BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
+	let serialized_length = call_const_key_history!(c, get_acks_length, address)?;
+
+	println!(
+		"Acks for address {} is of size: {:?}",
+		address, serialized_length
+	);
+	for n in 0..serialized_length.low_u64() {
+		let serialized_ack = call_const_key_history!(c, acks, address, n)?;
+		println!("Ack #{} for address {}: {:?}", n, address, serialized_ack);
+		let deserialized_ack: Ack = bincode::deserialize(&serialized_ack).unwrap();
+		skg.handle_ack(&p, deserialized_ack).unwrap();
 	}
+
+	Ok(())
 }
 
 #[derive(Clone)]

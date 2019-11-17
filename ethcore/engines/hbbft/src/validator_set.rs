@@ -4,7 +4,6 @@ use ethereum_types::Address;
 use ethkey::Public;
 use std::collections::BTreeMap;
 use std::str::FromStr;
-
 use util::CallError;
 
 use_contract!(
@@ -18,7 +17,7 @@ lazy_static! {
 }
 
 macro_rules! call_const_validator {
-	($c:ident, $x:ident $(, $a:expr ),*) => {
+	($c:ident, $x:ident $(, $a:expr )*) => {
 		$c.call_const(validator_set_hbbft_mock::functions::$x::call($($a),*))
 	};
 }

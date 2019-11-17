@@ -218,14 +218,6 @@ impl HoneyBadgerBFT {
 
 	fn try_init_honey_badger(&self) {
 		let params = if let Some(client) = self.client_arc() {
-			let full_client = match client.as_full_client() {
-				Some(full_client) => full_client,
-				None => {
-					debug!(target: "engine", "Failed to upgrade to BlockchainClient.");
-					return;
-				}
-			};
-
 			// TODO: Set private key corresponding to validator settings as signer in tests
 			let secret = "49c437676c600660905204e5f3710a6db5d3f46e3da9ba5168b9d34b0b787317"
 				.from_hex()
@@ -263,8 +255,8 @@ impl HoneyBadgerBFT {
 			};
 
 			for v in vmap.keys() {
-				part_of_address(full_client, *v, public, &mut synckeygen);
-				acks_of_address(full_client, *v, public, &mut synckeygen);
+				assert!(part_of_address(&*client, *v, public, &mut synckeygen).is_ok());
+				assert!(acks_of_address(&*client, *v, public, &mut synckeygen).is_ok());
 				assert!(synckeygen.is_ready());
 			}
 
@@ -343,7 +335,9 @@ impl HoneyBadgerBFT {
 				}
 			});
 
-		self.random_numbers.write().insert(batch.epoch, random_number);
+		self.random_numbers
+			.write()
+			.insert(batch.epoch, random_number);
 
 		if let Some(header) = client.create_pending_block_at(batch_txns, timestamp, batch.epoch) {
 			let block_num = header.number();
