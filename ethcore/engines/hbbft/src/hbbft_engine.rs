@@ -1,6 +1,7 @@
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
+use std::ops::BitXor;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -17,7 +18,7 @@ use engine::{
 	signer::{from_keypair, EngineSigner},
 	Engine,
 };
-use ethereum_types::H512;
+use ethereum_types::{H512, U256};
 use ethjson::spec::HbbftParams;
 use ethkey::{KeyPair, Public, Secret};
 use hbbft::crypto::serde_impl::SerdeSecret;
@@ -66,6 +67,7 @@ pub struct HoneyBadgerBFT {
 	sealing: RwLock<BTreeMap<BlockNumber, Sealing>>,
 	params: HbbftParams,
 	message_counter: RwLock<usize>,
+	random_numbers: RwLock<BTreeMap<BlockNumber, U256>>,
 }
 
 struct TransitionHandler {
@@ -173,6 +175,7 @@ impl HoneyBadgerBFT {
 			sealing: RwLock::new(BTreeMap::new()),
 			params,
 			message_counter: RwLock::new(0),
+			random_numbers: RwLock::new(BTreeMap::new()),
 		});
 
 		if !engine.params.is_unit_test.unwrap_or(false) {
@@ -326,6 +329,21 @@ impl HoneyBadgerBFT {
 			.map(|(_, c)| c.timestamp)
 			.sorted();
 		let timestamp = timestamps[timestamps.len() / 2];
+
+		let random_number = batch
+			.contributions
+			.iter()
+			.fold(U256::zero(), |acc, (n, c)| {
+				if c.random_data.len() >= 32 {
+					U256::from(&c.random_data[0..32]).bitxor(acc)
+				} else {
+					// TODO: Report malicious behavior by node!
+					error!(target: "consensus", "Insufficient random data from node {}", n);
+					acc
+				}
+			});
+
+		self.random_numbers.write().insert(batch.epoch, random_number);
 
 		if let Some(header) = client.create_pending_block_at(batch_txns, timestamp, batch.epoch) {
 			let block_num = header.number();
@@ -521,7 +539,11 @@ impl HoneyBadgerBFT {
 		honey_badger: &mut HoneyBadger,
 	) {
 		if let Some(parent_block_number) = client.block_number(BlockId::Latest) {
-			honey_badger.skip_to_epoch(parent_block_number + 1);
+			let next_block = parent_block_number + 1;
+			honey_badger.skip_to_epoch(next_block);
+			// We clear the random numbers of already imported blocks.
+			let mut random_numbers = self.random_numbers.write();
+			*random_numbers = random_numbers.split_off(&next_block);
 		} else {
 			error!(target: "consensus", "The current chain latest block number could not be obtained.");
 		}
@@ -600,6 +622,18 @@ impl Engine for HoneyBadgerBFT {
 	fn set_signer(&self, signer: Box<dyn EngineSigner>) {
 		*self.signer.write() = Some(signer);
 		self.try_init_honey_badger();
+	}
+
+	fn on_prepare_block(&self, block: &ExecutedBlock) -> Result<Vec<SignedTransaction>, Error> {
+		let _random_number = match self.random_numbers.read().get(&block.header.number()) {
+			None => {
+				return Err(Error::Engine(EngineError::Custom(
+					"No value available for calling randomness contract.".into(),
+				)))
+			}
+			Some(r) => r,
+		};
+		Ok(Vec::new())
 	}
 
 	fn sealing_state(&self) -> SealingState {
