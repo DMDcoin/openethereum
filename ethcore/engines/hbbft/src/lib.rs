@@ -38,15 +38,11 @@ extern crate spec;
 #[cfg(test)]
 extern crate toml;
 
+mod contracts;
 mod contribution;
 mod hbbft_engine;
 mod sealing;
-mod keygen_history;
-mod util;
-mod validator_set;
-
-#[cfg(any(test, feature = "test-helpers"))]
-pub mod test_helpers;
+mod utils;
 
 use std::fmt;
 
@@ -71,7 +67,7 @@ impl fmt::Display for NodeId {
 
 #[cfg(test)]
 mod tests {
-	use crate::test_helpers::{hbbft_client_setup, inject_transaction, HbbftTestData};
+	use crate::utils::test_helpers::{hbbft_client_setup, inject_transaction, HbbftTestData};
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
 	use ethereum_types::H256;

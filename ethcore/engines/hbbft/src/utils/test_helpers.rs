@@ -17,7 +17,7 @@ use std::sync::Arc;
 pub fn hbbft_spec() -> Spec {
 	Spec::load(
 		&::std::env::temp_dir(),
-		include_bytes!("../res/honey_badger_bft.json") as &[u8],
+		include_bytes!("../../res/honey_badger_bft.json") as &[u8],
 	)
 	.expect(concat!("Chain spec is invalid."))
 }

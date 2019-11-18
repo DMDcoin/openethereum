@@ -7,7 +7,7 @@ use hbbft::sync_key_gen::{Ack, Error, Part, PubKeyMap, PublicKey, SecretKey, Syn
 use parking_lot::RwLock;
 use std::str::FromStr;
 use std::sync::Arc;
-use util::CallError;
+use utils::bound_contract::{BoundContract, CallError};
 
 use_contract!(key_history_contract, "res/key_history_contract.json");
 
@@ -46,7 +46,7 @@ pub fn part_of_address(
 	p: Public,
 	skg: &mut SyncKeyGen<Public, PublicWrapper>,
 ) -> Result<(), CallError> {
-	let c = crate::util::BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
+	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_part = call_const_key_history!(c, parts, address)?;
 	println!("Part for address {}: {:?}", address, serialized_part);
 	let deserialized_part: Part = bincode::deserialize(&serialized_part).unwrap();
@@ -62,7 +62,7 @@ pub fn acks_of_address(
 	p: Public,
 	skg: &mut SyncKeyGen<Public, PublicWrapper>,
 ) -> Result<(), CallError> {
-	let c = crate::util::BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
+	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_length = call_const_key_history!(c, get_acks_length, address)?;
 
 	println!(

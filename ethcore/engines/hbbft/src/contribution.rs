@@ -50,7 +50,7 @@ impl Contribution {
 
 #[cfg(test)]
 mod tests {
-	use crate::test_helpers::create_transaction;
+	use crate::utils::test_helpers::create_transaction;
 	use common_types::transaction::SignedTransaction;
 	use rlp::{Decodable, Rlp};
 

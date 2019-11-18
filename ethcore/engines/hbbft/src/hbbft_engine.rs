@@ -35,11 +35,11 @@ use serde::Deserialize;
 use serde_json;
 
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
-use crate::keygen_history::{
+use crate::contracts::keygen_history::{
 	acks_of_address, engine_signer_to_synckeygen, part_of_address, PublicWrapper,
 };
 use crate::sealing::{self, RlpSig, Sealing};
-use crate::validator_set::get_validator_map;
+use crate::contracts::validator_set::get_validator_map;
 use crate::NodeId;
 
 type HoneyBadger = honey_badger::HoneyBadger<Contribution, NodeId>;
@@ -715,7 +715,7 @@ impl Engine for HoneyBadgerBFT {
 #[cfg(test)]
 mod tests {
 	use crate::contribution::Contribution;
-	use crate::test_helpers::create_transaction;
+	use crate::utils::test_helpers::create_transaction;
 	use common_types::transaction::SignedTransaction;
 	use hbbft::honey_badger::{HoneyBadger, HoneyBadgerBuilder};
 	use hbbft::NetworkInfo;

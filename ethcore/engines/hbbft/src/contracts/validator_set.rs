@@ -4,7 +4,7 @@ use ethereum_types::Address;
 use ethkey::Public;
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use util::CallError;
+use utils::bound_contract::{BoundContract, CallError};
 
 use_contract!(
 	validator_set_hbbft_mock,
@@ -26,7 +26,7 @@ pub fn get_validator_map(
 	client: &dyn EngineClient,
 ) -> Result<BTreeMap<Address, Public>, CallError> {
 	// bind contract
-	let c = crate::util::BoundContract::bind(client, BlockId::Latest, *VALIDATOR_SET_ADDRESS);
+	let c = BoundContract::bind(client, BlockId::Latest, *VALIDATOR_SET_ADDRESS);
 
 	let validators = call_const_validator!(c, get_validators)?;
 
