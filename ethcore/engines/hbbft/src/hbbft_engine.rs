@@ -257,8 +257,8 @@ impl HoneyBadgerBFT {
 			for v in vmap.keys() {
 				assert!(part_of_address(&*client, *v, public, &mut synckeygen).is_ok());
 				assert!(acks_of_address(&*client, *v, public, &mut synckeygen).is_ok());
-				assert!(synckeygen.is_ready());
 			}
+			assert!(synckeygen.is_ready());
 
 			// TODO: Retrieve the information to build a node-specific NetworkInfo
 			//       struct from the chain spec and from contracts.
