@@ -1,6 +1,7 @@
 use client_traits::EngineClient;
 use common_types::ids::BlockId;
 use ethereum_types::Address;
+use ethkey::Public;
 use std::str::FromStr;
 use utils::bound_contract::{BoundContract, CallError};
 
@@ -17,14 +18,13 @@ macro_rules! call_const_staking {
 	};
 }
 
-pub fn get_pool_pubkey(client: &dyn EngineClient, address: Address) -> Result<(), CallError> {
+pub fn get_pool_pubkey(client: &dyn EngineClient, address: Address) -> Result<Public, CallError> {
 	let c = BoundContract::bind(client, BlockId::Latest, *STAKING_ADDRESS);
 	let pub_key = call_const_staking!(c, get_pool_public_key, address)?;
-	println!("Public Key for address {}: {:?}", address, pub_key);
-	Ok(())
-}
-
-pub fn get_pool_addresses(client: &dyn EngineClient) -> Result<Vec<Address>, CallError> {
-	let c = BoundContract::bind(client, BlockId::Latest, *STAKING_ADDRESS);
-	Ok(call_const_staking!(c, get_pools)?)
+	if pub_key.len() != 64 {
+		return Err(CallError::ReturnValueInvalid);
+	}
+	let pub_key = Public::from_slice(&pub_key);
+	// println!("Public Key for staking address {}: {:?}", address, pub_key);
+	Ok(pub_key)
 }

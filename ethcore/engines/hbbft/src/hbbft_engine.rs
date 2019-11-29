@@ -37,9 +37,7 @@ use serde_json;
 use crate::contracts::keygen_history::{
 	acks_of_address, engine_signer_to_synckeygen, part_of_address, PublicWrapper,
 };
-use crate::contracts::staking::{get_pool_addresses, get_pool_pubkey};
-use crate::contracts::validator_set::{get_validators, staking_by_mining_address};
-use crate::contracts::validator_set_mock::get_validator_mock_map;
+use crate::contracts::validator_set::get_validator_pubkeys;
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
 use crate::sealing::{self, RlpSig, Sealing};
 use crate::NodeId;
@@ -229,21 +227,7 @@ impl HoneyBadgerBFT {
 			let signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>> =
 				Arc::new(RwLock::new(Some(from_keypair(keypair))));
 
-			match get_validators(&*client) {
-				Ok(vmap) => {
-					for v in vmap {
-						println!("Validator in actual validator contract: {}", v);
-						let pool_address = staking_by_mining_address(&*client, v).unwrap();
-						get_pool_pubkey(&*client, pool_address);
-					}
-				}
-				Err(_) => {
-					println!("Error on getting actual validator list");
-					return;
-				}
-			}
-
-			let vmap = match get_validator_mock_map(&*client) {
+			let vmap = match get_validator_pubkeys(&*client) {
 				Ok(vmap) => vmap,
 				Err(_) => {
 					error!(target: "engine", "Map of validator-associated data could not be obtained.");

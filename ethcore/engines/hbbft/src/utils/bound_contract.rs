@@ -31,6 +31,8 @@ pub enum CallError {
 	DecodeFailed(ethabi::Error),
 	/// The passed in client reference could not be upgraded to a `BlockchainClient`.
 	NotFullClient,
+	/// The value(s) returned by the call are unexpected
+	ReturnValueInvalid,
 }
 
 impl<'a> fmt::Debug for BoundContract<'a> {
