@@ -1,9 +1,12 @@
+use crate::NodeId;
 use client_traits::EngineClient;
 use common_types::ids::BlockId;
 use engine::signer::EngineSigner;
 use ethereum_types::Address;
 use ethkey::Public;
 use hbbft::sync_key_gen::{Ack, Error, Part, PubKeyMap, PublicKey, SecretKey, SyncKeyGen};
+use hbbft::util::max_faulty;
+use hbbft::NetworkInfo;
 use parking_lot::RwLock;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -37,7 +40,24 @@ pub fn engine_signer_to_synckeygen<'a>(
 		.expect("Signer's public key must be available!");
 	let mut rng = rand::thread_rng();
 	let num_nodes = pub_keys.len();
-	SyncKeyGen::new(public, wrapper, pub_keys, (num_nodes - 1) / 3, &mut rng)
+	SyncKeyGen::new(public, wrapper, pub_keys, max_faulty(num_nodes), &mut rng)
+}
+
+pub fn synckeygen_to_network_info(
+	synckeygen: &SyncKeyGen<Public, PublicWrapper>,
+) -> Option<NetworkInfo<NodeId>> {
+	let (pks, sks) = synckeygen.generate().ok()?;
+	let pub_keys = synckeygen
+		.public_keys()
+		.keys()
+		.map(|p| NodeId(*p))
+		.collect::<Vec<_>>();
+	Some(NetworkInfo::new(
+		NodeId(synckeygen.our_id().clone()),
+		sks,
+		pks,
+		pub_keys,
+	))
 }
 
 pub fn part_of_address(

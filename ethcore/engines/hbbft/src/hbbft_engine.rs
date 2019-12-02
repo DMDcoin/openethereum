@@ -35,7 +35,8 @@ use serde::Deserialize;
 use serde_json;
 
 use crate::contracts::keygen_history::{
-	acks_of_address, engine_signer_to_synckeygen, part_of_address, PublicWrapper,
+	acks_of_address, engine_signer_to_synckeygen, part_of_address, synckeygen_to_network_info,
+	PublicWrapper,
 };
 use crate::contracts::validator_set::get_validator_pubkeys;
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
@@ -259,6 +260,8 @@ impl HoneyBadgerBFT {
 				assert!(acks_of_address(&*client, *v, public, &mut synckeygen).is_ok());
 			}
 			assert!(synckeygen.is_ready());
+			let _ = synckeygen_to_network_info(&synckeygen);
+			// TODO: construct Honey Badger from network info constructed from synckeygen
 
 			// TODO: Retrieve the information to build a node-specific NetworkInfo
 			//       struct from the chain spec and from contracts.
