@@ -268,6 +268,25 @@ arg_enum! {
 	}
 }
 
+fn write_json_for_secret(secret: Secret, filename: String) {
+	let json_key: KeyFile = SafeAccount::create(
+		&KeyPair::from_secret(secret).unwrap(),
+		[0u8; 16],
+		&"test".into(),
+		10240,
+		"Test".to_owned(),
+		"{}".to_owned(),
+	)
+	.expect("json key object creation should succeed")
+	.into();
+
+	let serialized_json_key =
+		serde_json::to_string(&json_key).expect("json key object serialization should succeed");
+	fs::write(filename, serialized_json_key).expect("Unable to write json key file");
+}
+
+use rustc_hex::FromHex;
+
 fn main() {
 	let matches = App::new("hbbft parity config generator")
 		.version("1.0")
@@ -333,24 +352,7 @@ fn main() {
 		let file_name = format!("hbbft_validator_key_{}", i);
 		fs::write(file_name, enode.secret.to_hex()).expect("Unable to write key file");
 
-		let json_key: KeyFile = SafeAccount::create(
-			&KeyPair::from_secret(enode.secret.clone()).unwrap(),
-			[0u8; 16],
-			&"test".into(),
-			10240,
-			"Test".to_owned(),
-			"{}".to_owned(),
-		)
-		.expect("json key object creation should succeed")
-		.into();
-
-		let serialized_json_key =
-			serde_json::to_string(&json_key).expect("json key object serialization should succeed");
-		fs::write(
-			format!("hbbft_validator_key_{}.json", i),
-			serialized_json_key,
-		)
-		.expect("Unable to write json key file");
+		write_json_for_secret(enode.secret.clone(), format!("hbbft_validator_key_{}.json", i));
 	}
 	// Write rpc node config
 	let rpc_string = toml::to_string(&to_toml(

@@ -5,7 +5,7 @@ use std::ops::BitXor;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use client_traits::{EngineClient, HbbftOptions};
+use client_traits::EngineClient;
 use common_types::{
 	engines::{params::CommonParams, Seal, SealingState},
 	errors::{BlockError, EngineError, EthcoreError as Error},
@@ -14,15 +14,10 @@ use common_types::{
 	transaction::SignedTransaction,
 	BlockNumber,
 };
-use engine::{
-	signer::{from_keypair, EngineSigner},
-	Engine,
-};
+use engine::{signer::EngineSigner, Engine};
 use ethereum_types::{H512, U256};
 use ethjson::spec::HbbftParams;
-use ethkey::{KeyPair, Public, Secret};
-use hbbft::crypto::serde_impl::SerdeSecret;
-use hbbft::crypto::{PublicKey, PublicKeySet, SecretKeyShare};
+use hbbft::crypto::PublicKey;
 use hbbft::honey_badger::{self, HoneyBadgerBuilder, Step};
 use hbbft::{NetworkInfo, Target};
 use io::{IoContext, IoHandler, IoService, TimerToken};
@@ -30,7 +25,6 @@ use itertools::Itertools;
 use machine::{ExecutedBlock, Machine};
 use parking_lot::RwLock;
 use rlp::{self, Decodable, Rlp};
-use rustc_hex::FromHex;
 use serde::Deserialize;
 use serde_json;
 
@@ -193,101 +187,39 @@ impl HoneyBadgerBFT {
 		Ok(engine)
 	}
 
-	fn new_network_info(params: HbbftOptions, our_id: NodeId) -> Option<NetworkInfo<NodeId>> {
-		let secret_key_share_wrap: SerdeSecret<SecretKeyShare> =
-			serde_json::from_str(&params.hbbft_secret_share).ok()?;
-		let secret_key_share = secret_key_share_wrap.into_inner();
-		let pks: PublicKeySet = serde_json::from_str(&params.hbbft_public_key_set).ok()?;
-		let ips: BTreeMap<NodeId, String> =
-			serde_json::from_str(&params.hbbft_validator_ip_addresses).ok()?;
-
-		Some(NetworkInfo::new(our_id, secret_key_share, pks, ips.keys()))
+	fn new_honey_badger(&self, network_info: NetworkInfo<NodeId>) -> Option<HoneyBadger> {
+		let mut builder: HoneyBadgerBuilder<Contribution, _> =
+			HoneyBadger::builder(Arc::new(network_info));
+		return Some(builder.build());
 	}
 
-	fn new_honey_badger(&self, params: HbbftOptions, our_id: NodeId) -> Option<HoneyBadger> {
-		// TODO: Retrieve the information to build a node-specific NetworkInfo
-		//       struct from the chain spec and from contracts.
-		if let Some(net_info) = HoneyBadgerBFT::new_network_info(params, our_id) {
-			let mut builder: HoneyBadgerBuilder<Contribution, _> =
-				HoneyBadger::builder(Arc::new(net_info.clone()));
-			*self.network_info.write() = Some(net_info);
-			return Some(builder.build());
-		} else {
-			return None;
+	fn try_init_honey_badger(&self) -> Option<()> {
+		let our_id = NodeId((self.signer.read().as_ref()?).public()?);
+		let client = self.client_arc()?;
+		let vmap = get_validator_pubkeys(&*client).ok()?;
+
+		let pub_keys: BTreeMap<_, _> = vmap
+			.values()
+			.map(|p| (*p, PublicWrapper { inner: p.clone() }))
+			.collect();
+		let mut synckeygen = match engine_signer_to_synckeygen(&self.signer, Arc::new(pub_keys)) {
+			Ok((skg, _)) => skg,
+			Err(_) => return None,
+		};
+
+		for v in vmap.keys() {
+			assert!(part_of_address(&*client, *v, our_id.0, &mut synckeygen).is_ok());
+			assert!(acks_of_address(&*client, *v, our_id.0, &mut synckeygen).is_ok());
 		}
-	}
+		assert!(synckeygen.is_ready());
+		let network_info = synckeygen_to_network_info(&synckeygen)?;
 
-	fn try_init_honey_badger(&self) {
-		let params = if let Some(client) = self.client_arc() {
-			// TODO: Set private key corresponding to validator settings as signer in tests
-			let secret = "49c437676c600660905204e5f3710a6db5d3f46e3da9ba5168b9d34b0b787317"
-				.from_hex()
-				.unwrap();
-			let keypair = KeyPair::from_secret(Secret::from_slice(&secret).unwrap())
-				.expect("KeyPair generation must succeed");
-			let signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>> =
-				Arc::new(RwLock::new(Some(from_keypair(keypair))));
+		*self.public_master_key.write() = Some(network_info.public_key_set().public_key());
+		*self.network_info.write() = Some(network_info.clone());
+		*self.honey_badger.write() = Some(self.new_honey_badger(network_info)?);
 
-			let vmap = match get_validator_pubkeys(&*client) {
-				Ok(vmap) => vmap,
-				Err(_) => {
-					error!(target: "engine", "Map of validator-associated data could not be obtained.");
-					return;
-				}
-			};
-
-			// TODO: Use public keys from validator contract.
-			let public = signer
-				.read()
-				.as_ref()
-				.expect("Signer must be set!")
-				.public()
-				.unwrap();
-			let public_wrapper = PublicWrapper {
-				inner: public.clone(),
-			};
-
-			let mut pub_keys: BTreeMap<Public, PublicWrapper> = BTreeMap::new();
-			pub_keys.insert(public, public_wrapper);
-
-			let mut synckeygen = match engine_signer_to_synckeygen(signer, Arc::new(pub_keys)) {
-				Ok((skg, _)) => skg,
-				Err(_) => return,
-			};
-
-			for v in vmap.keys() {
-				assert!(part_of_address(&*client, *v, public, &mut synckeygen).is_ok());
-				assert!(acks_of_address(&*client, *v, public, &mut synckeygen).is_ok());
-			}
-			assert!(synckeygen.is_ready());
-			let _ = synckeygen_to_network_info(&synckeygen);
-			// TODO: construct Honey Badger from network info constructed from synckeygen
-
-			// TODO: Retrieve the information to build a node-specific NetworkInfo
-			//       struct from the chain spec and from contracts.
-			client.hbbft_options().expect("hbbft params have to exist")
-		} else {
-			return; // No client set yet.
-		};
-		let pks: PublicKeySet = match serde_json::from_str(&params.hbbft_public_key_set) {
-			Ok(pks) => pks,
-			Err(err) => {
-				error!(target: "engine", "Failed to read public master key from params: {:?}", err);
-				return;
-			}
-		};
-		*self.public_master_key.write() = Some(pks.public_key());
-		let our_id = if let Some(signer) = self.signer.read().as_ref() {
-			NodeId(signer.public().unwrap()) // Can this be `None`?
-		} else {
-			return; // No engine signer set.
-		};
-
-		if let Some(honey_badger) = self.new_honey_badger(params, our_id) {
-			*self.honey_badger.write() = Some(honey_badger);
-		} else {
-			info!(target: "engine", "HoneyBadger algorithm could not be created - running as regular node");
-		}
+		info!(target: "engine", "HoneyBadger Algorithm initialized! Running as validator node.");
+		Some(())
 	}
 
 	fn process_output(&self, client: Arc<dyn EngineClient>, output: Vec<Batch>) {
@@ -613,12 +545,16 @@ impl Engine for HoneyBadgerBFT {
 
 	fn register_client(&self, client: Weak<dyn EngineClient>) {
 		*self.client.write() = Some(client.clone());
-		self.try_init_honey_badger();
+		if let None = self.try_init_honey_badger() {
+			info!(target: "engine", "HoneyBadger Algorithm could not be created - running as regular node.");
+		}
 	}
 
 	fn set_signer(&self, signer: Box<dyn EngineSigner>) {
 		*self.signer.write() = Some(signer);
-		self.try_init_honey_badger();
+		if let None = self.try_init_honey_badger() {
+			info!(target: "engine", "HoneyBadger Algorithm could not be created - running as regular node.");
+		}
 	}
 
 	fn on_prepare_block(&self, block: &ExecutedBlock) -> Result<Vec<SignedTransaction>, Error> {

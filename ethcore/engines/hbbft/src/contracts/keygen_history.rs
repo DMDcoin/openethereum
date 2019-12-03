@@ -26,7 +26,7 @@ macro_rules! call_const_key_history {
 }
 
 pub fn engine_signer_to_synckeygen<'a>(
-	signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
+	signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 	pub_keys: PubKeyMap<Public, PublicWrapper>,
 ) -> Result<(SyncKeyGen<Public, PublicWrapper>, Option<Part>), Error> {
 	let wrapper = KeyPairWrapper {
@@ -162,6 +162,6 @@ mod tests {
 		let mut pub_keys: BTreeMap<Public, PublicWrapper> = BTreeMap::new();
 		pub_keys.insert(public, wrapper);
 
-		assert!(engine_signer_to_synckeygen(signer, Arc::new(pub_keys)).is_ok());
+		assert!(engine_signer_to_synckeygen(&signer, Arc::new(pub_keys)).is_ok());
 	}
 }

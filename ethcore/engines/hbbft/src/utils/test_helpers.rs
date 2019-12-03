@@ -50,6 +50,23 @@ fn serialize_netinfo(
 	}
 }
 
+pub fn hbbft_client_setup_from_contracts(keypair: KeyPair) -> HbbftTestData {
+	let client = hbbft_client();
+	let miner = client.miner();
+	let engine = client.engine();
+	let signer = from_keypair(keypair);
+	engine.set_signer(signer);
+	engine.register_client(Arc::downgrade(&client) as _);
+	let notify = Arc::new(TestNotify::default());
+	client.add_notify(notify.clone());
+
+	HbbftTestData {
+		client,
+		notify,
+		miner,
+	}
+}
+
 pub fn hbbft_client_setup(
 	keypair: KeyPair,
 	net_info: NetworkInfo<Public>,

@@ -67,7 +67,9 @@ impl fmt::Display for NodeId {
 
 #[cfg(test)]
 mod tests {
-	use crate::utils::test_helpers::{hbbft_client_setup, inject_transaction, HbbftTestData};
+	use crate::utils::test_helpers::{
+		hbbft_client_setup, hbbft_client_setup_from_contracts, inject_transaction, HbbftTestData,
+	};
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
 	use ethereum_types::H256;
@@ -77,37 +79,8 @@ mod tests {
 	use hbbft_testing::proptest::{gen_seed, TestRng, TestRngSeed};
 	use proptest::{prelude::ProptestConfig, proptest};
 	use rand::{Rng, SeedableRng};
+	use rustc_hex::FromHex;
 	use std::collections::BTreeMap;
-
-	proptest! {
-		#![proptest_config(ProptestConfig {
-			cases: 1, .. ProptestConfig::default()
-		})]
-
-		#[test]
-		#[allow(clippy::unnecessary_operation)]
-		fn test_miner_transaction_injection(seed in gen_seed()) {
-			do_test_miner_transaction_injection(seed)
-		}
-
-		#[test]
-		#[allow(clippy::unnecessary_operation)]
-		fn test_two_clients(seed in gen_seed()) {
-			do_test_two_clients(seed)
-		}
-
-		#[test]
-		#[allow(clippy::unnecessary_operation)]
-		fn test_multiple_clients(seed in gen_seed()) {
-			do_test_multiple_clients(seed)
-		}
-
-		#[test]
-		#[allow(clippy::unnecessary_operation)]
-		fn test_trigger_at_contribution_threshold(seed in gen_seed()) {
-			do_test_trigger_at_contribution_threshold(seed)
-		}
-	}
 
 	fn generate_nodes<R: Rng>(size: usize, rng: &mut R) -> BTreeMap<Public, HbbftTestData> {
 		let keypairs: Vec<KeyPair> = (1..=size)
@@ -131,18 +104,23 @@ mod tests {
 			.collect()
 	}
 
+	fn generate_for_spec() -> HbbftTestData {
+		let secret = "49c437676c600660905204e5f3710a6db5d3f46e3da9ba5168b9d34b0b787317"
+			.from_hex()
+			.unwrap();
+		let keypair = KeyPair::from_secret(Secret::from_slice(&secret).unwrap())
+			.expect("KeyPair generation must succeed");
+		hbbft_client_setup_from_contracts(keypair)
+	}
+
 	// Returns `true` if the node has any unsent messages left.
 	fn has_messages(node: &HbbftTestData) -> bool {
 		!node.notify.targeted_messages.read().is_empty()
 	}
 
-	fn do_test_miner_transaction_injection(seed: TestRngSeed) {
-		let mut rng = TestRng::from_seed(seed);
-		let test_data = generate_nodes(1, &mut rng)
-			.into_iter()
-			.nth(0)
-			.expect("A NetworkInfo must exist for node 0")
-			.1;
+	#[test]
+	fn test_miner_transaction_injection() {
+		let test_data = generate_for_spec();
 
 		// Verify that we actually start at block 0.
 		assert_eq!(test_data.client.chain().best_block_number(), 0);
@@ -179,6 +157,30 @@ mod tests {
 	fn crank_network(nodes: &BTreeMap<Public, HbbftTestData>) {
 		while nodes.iter().any(|(_, test_data)| has_messages(test_data)) {
 			crank_network_single_step(nodes);
+		}
+	}
+
+	proptest! {
+		#![proptest_config(ProptestConfig {
+			cases: 1, .. ProptestConfig::default()
+		})]
+
+		#[test]
+		#[allow(clippy::unnecessary_operation)]
+		fn test_two_clients(seed in gen_seed()) {
+			do_test_two_clients(seed)
+		}
+
+		#[test]
+		#[allow(clippy::unnecessary_operation)]
+		fn test_multiple_clients(seed in gen_seed()) {
+			do_test_multiple_clients(seed)
+		}
+
+		#[test]
+		#[allow(clippy::unnecessary_operation)]
+		fn test_trigger_at_contribution_threshold(seed in gen_seed()) {
+			do_test_trigger_at_contribution_threshold(seed)
 		}
 	}
 
