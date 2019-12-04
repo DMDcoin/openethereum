@@ -20,6 +20,7 @@ clap = "2"
 ethcore = { path = "../../.." }
 ethkey = { path = "../../../../accounts/ethkey" }
 ethstore = { path = "../../../../accounts/ethstore"}
+parity-crypto = { version = "0.4.2", features = ["publickey"] }
 rustc-hex = "1.0"
 
 [dev-dependencies]

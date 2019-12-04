@@ -17,8 +17,7 @@
 //! A signer used by Engines which need to sign messages.
 
 use ethereum_types::{H256, Address};
-use parity_crypto::publickey::{Signature, KeyPair, Error, Public};
-use parity_crypto::ecies;
+use parity_crypto::publickey::{Signature, KeyPair, ecies, Error, Public};
 
 /// Everything that an Engine needs to sign messages.
 pub trait EngineSigner: Send + Sync {

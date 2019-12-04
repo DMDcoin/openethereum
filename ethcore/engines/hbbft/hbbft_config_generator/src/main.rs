@@ -6,6 +6,7 @@ extern crate ethcore;
 extern crate ethkey;
 extern crate ethstore;
 extern crate hbbft;
+extern crate parity_crypto;
 extern crate rand;
 extern crate rustc_hex;
 extern crate serde;
@@ -15,14 +16,13 @@ extern crate toml;
 mod keygen_history_helpers;
 
 use clap::{App, Arg};
-use ethkey::{Address, Generator, KeyPair, Public, Random, Secret};
+use parity_crypto::publickey::{Address, Generator, KeyPair, Public, Random, Secret};
 use ethstore::{KeyFile, SafeAccount};
 use hbbft::crypto::serde_impl::SerdeSecret;
 use hbbft::sync_key_gen::SyncKeyGen;
 use keygen_history_helpers::{
 	enodes_to_pub_keys, generate_keygens, key_sync_history_data, KeyPairWrapper,
 };
-use rustc_hex::ToHex;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -285,8 +285,6 @@ fn write_json_for_secret(secret: Secret, filename: String) {
 	fs::write(filename, serialized_json_key).expect("Unable to write json key file");
 }
 
-use rustc_hex::FromHex;
-
 fn main() {
 	let matches = App::new("hbbft parity config generator")
 		.version("1.0")
@@ -352,7 +350,10 @@ fn main() {
 		let file_name = format!("hbbft_validator_key_{}", i);
 		fs::write(file_name, enode.secret.to_hex()).expect("Unable to write key file");
 
-		write_json_for_secret(enode.secret.clone(), format!("hbbft_validator_key_{}.json", i));
+		write_json_for_secret(
+			enode.secret.clone(),
+			format!("hbbft_validator_key_{}.json", i),
+		);
 	}
 	// Write rpc node config
 	let rpc_string = toml::to_string(&to_toml(

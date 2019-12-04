@@ -5,7 +5,7 @@ use std::ops::BitXor;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use client_traits::EngineClient;
+use client_traits::{EngineClient, ForceUpdateSealing};
 use common_types::{
 	engines::{params::CommonParams, Seal, SealingState},
 	errors::{BlockError, EngineError, EthcoreError as Error},
@@ -127,7 +127,7 @@ impl IoHandler<()> for TransitionHandler {
 			// TODO: In theory, that should not happen. The seal is ready exactly when the sealing entry is `Complete`.
 			if let Some(ref weak) = *self.client.read() {
 				if let Some(c) = weak.upgrade() {
-					c.update_sealing();
+					c.update_sealing(ForceUpdateSealing::No);
 				}
 			}
 
@@ -398,7 +398,7 @@ impl HoneyBadgerBFT {
 			trace!(target: "consensus", "Signature for block {} is ready", block_num);
 			let state = Sealing::Complete(sig);
 			self.sealing.write().insert(block_num, state);
-			client.update_sealing();
+			client.update_sealing(ForceUpdateSealing::No);
 		}
 	}
 
@@ -550,8 +550,8 @@ impl Engine for HoneyBadgerBFT {
 		}
 	}
 
-	fn set_signer(&self, signer: Box<dyn EngineSigner>) {
-		*self.signer.write() = Some(signer);
+	fn set_signer(&self, signer: Option<Box<dyn EngineSigner>>) {
+		*self.signer.write() = signer;
 		if let None = self.try_init_honey_badger() {
 			info!(target: "engine", "HoneyBadger Algorithm could not be created - running as regular node.");
 		}

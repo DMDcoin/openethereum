@@ -1,5 +1,5 @@
 use crate::Enode;
-use ethkey::{Address, Public, Secret, public_to_address};
+use parity_crypto::publickey::{Address, Public, Secret, public_to_address};
 use hbbft::sync_key_gen::{AckOutcome, Part, PartOutcome, PublicKey, SecretKey, SyncKeyGen};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -12,21 +12,21 @@ pub struct KeyPairWrapper {
 }
 
 impl PublicKey for KeyPairWrapper {
-	type Error = ethkey::crypto::Error;
+	type Error = parity_crypto::publickey::Error;
 	type SecretKey = KeyPairWrapper;
 	fn encrypt<M: AsRef<[u8]>, R: rand::Rng>(
 		&self,
 		msg: M,
 		_rng: &mut R,
 	) -> Result<Vec<u8>, Self::Error> {
-		ethkey::crypto::ecies::encrypt(&self.public, b"", msg.as_ref())
+		parity_crypto::publickey::ecies::encrypt(&self.public, b"", msg.as_ref())
 	}
 }
 
 impl SecretKey for KeyPairWrapper {
-	type Error = ethkey::crypto::Error;
+	type Error = parity_crypto::publickey::Error;
 	fn decrypt(&self, ct: &[u8]) -> Result<Vec<u8>, Self::Error> {
-		ethkey::crypto::ecies::decrypt(&self.secret, b"", ct)
+		parity_crypto::publickey::ecies::decrypt(&self.secret, b"", ct)
 	}
 }
 

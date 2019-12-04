@@ -3,7 +3,7 @@ use client_traits::EngineClient;
 use common_types::ids::BlockId;
 use engine::signer::EngineSigner;
 use ethereum_types::Address;
-use ethkey::Public;
+use parity_crypto::publickey::Public;
 use hbbft::sync_key_gen::{Ack, Error, Part, PubKeyMap, PublicKey, SecretKey, SyncKeyGen};
 use hbbft::util::max_faulty;
 use hbbft::NetworkInfo;
@@ -110,19 +110,19 @@ pub struct KeyPairWrapper {
 }
 
 impl<'a> PublicKey for PublicWrapper {
-	type Error = ethkey::crypto::Error;
+	type Error = parity_crypto::publickey::Error;
 	type SecretKey = KeyPairWrapper;
 	fn encrypt<M: AsRef<[u8]>, R: rand::Rng>(
 		&self,
 		msg: M,
 		_rng: &mut R,
 	) -> Result<Vec<u8>, Self::Error> {
-		ethkey::crypto::ecies::encrypt(&self.inner, b"", msg.as_ref())
+		parity_crypto::publickey::ecies::encrypt(&self.inner, b"", msg.as_ref())
 	}
 }
 
 impl<'a> SecretKey for KeyPairWrapper {
-	type Error = ethkey::crypto::Error;
+	type Error = parity_crypto::publickey::Error;
 	fn decrypt(&self, ct: &[u8]) -> Result<Vec<u8>, Self::Error> {
 		self.inner
 			.read()

@@ -1,7 +1,7 @@
 use client_traits::EngineClient;
 use common_types::ids::BlockId;
 use ethereum_types::Address;
-use ethkey::Public;
+use parity_crypto::publickey::Public;
 use std::str::FromStr;
 use utils::bound_contract::{BoundContract, CallError};
 

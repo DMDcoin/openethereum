@@ -8,7 +8,7 @@ extern crate ethabi_contract;
 extern crate ethcore_io as io;
 extern crate ethcore_miner;
 extern crate ethereum_types;
-extern crate ethkey;
+extern crate parity_crypto;
 extern crate hbbft;
 extern crate hbbft_testing;
 extern crate itertools;
@@ -45,9 +45,7 @@ mod sealing;
 mod utils;
 
 use std::fmt;
-
-use ethkey::Public;
-
+use parity_crypto::publickey::Public;
 pub use hbbft_engine::HoneyBadgerBFT;
 
 #[derive(Clone, Copy, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

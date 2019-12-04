@@ -42,12 +42,12 @@ impl engine::signer::EngineSigner for EngineSigner {
 		}
 	}
 
-	fn decrypt(&self, auth_data: &[u8], cipher: &[u8]) -> Result<Vec<u8>, ethkey::crypto::Error> {
+	fn decrypt(&self, auth_data: &[u8], cipher: &[u8]) -> Result<Vec<u8>, parity_crypto::publickey::Error> {
 		match self.accounts.decrypt(self.address, None, auth_data, cipher) {
 			Ok(plain) => Ok(plain),
 			Err(e) => {
 				warn!("Unable to decrypt message: {:?}", e);
-				Err(ethkey::crypto::Error::InvalidMessage)
+				Err(parity_crypto::publickey::Error::InvalidMessage)
 			},
 		}
 	}
@@ -56,7 +56,7 @@ impl engine::signer::EngineSigner for EngineSigner {
 		self.address
 	}
 
-	fn public(&self) -> Option<ethkey::Public> {
+	fn public(&self) -> Option<parity_crypto::publickey::Public> {
 		self.accounts.account_public(self.address, &self.password).ok()
 	}
 }
