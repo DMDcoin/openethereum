@@ -194,7 +194,7 @@ impl HoneyBadgerBFT {
 	}
 
 	fn try_init_honey_badger(&self) -> Option<()> {
-		let our_id = NodeId((self.signer.read().as_ref()?).public()?);
+		let _our_id = NodeId((self.signer.read().as_ref()?).public()?);
 		let client = self.client_arc()?;
 		let vmap = get_validator_pubkeys(&*client).ok()?;
 
@@ -208,8 +208,10 @@ impl HoneyBadgerBFT {
 		};
 
 		for v in vmap.keys() {
-			assert!(part_of_address(&*client, *v, our_id.0, &mut synckeygen).is_ok());
-			assert!(acks_of_address(&*client, *v, our_id.0, &mut synckeygen).is_ok());
+			assert!(part_of_address(&*client, *v, &vmap, &mut synckeygen).is_ok());
+		}
+		for v in vmap.keys() {
+			assert!(acks_of_address(&*client, *v, &vmap, &mut synckeygen).is_ok());
 		}
 		assert!(synckeygen.is_ready());
 		let network_info = synckeygen_to_network_info(&synckeygen)?;

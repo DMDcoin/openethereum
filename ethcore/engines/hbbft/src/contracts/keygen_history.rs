@@ -3,11 +3,14 @@ use client_traits::EngineClient;
 use common_types::ids::BlockId;
 use engine::signer::EngineSigner;
 use ethereum_types::Address;
-use parity_crypto::publickey::Public;
-use hbbft::sync_key_gen::{Ack, Error, Part, PubKeyMap, PublicKey, SecretKey, SyncKeyGen};
+use hbbft::sync_key_gen::{
+	Ack, AckOutcome, Error, Part, PartOutcome, PubKeyMap, PublicKey, SecretKey, SyncKeyGen,
+};
 use hbbft::util::max_faulty;
 use hbbft::NetworkInfo;
+use parity_crypto::publickey::Public;
 use parking_lot::RwLock;
+use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use utils::bound_contract::{BoundContract, CallError};
@@ -52,6 +55,19 @@ pub fn synckeygen_to_network_info(
 		.keys()
 		.map(|p| NodeId(*p))
 		.collect::<Vec<_>>();
+	println!("Creating Network Info");
+	println!("pub_keys: {:?}", pub_keys);
+	println!("synckeygen.our_id: {}", synckeygen.our_id());
+	println!(
+		"pks: {:?}",
+		(0..(pub_keys.len()))
+			.map(|i| pks.public_key_share(i))
+			.collect::<Vec<_>>()
+	);
+	let sks = sks.unwrap();
+	println!("sks.public_key_share: {:?}", sks.public_key_share());
+	println!("sks.reveal: {:?}", sks.reveal());
+
 	Some(NetworkInfo::new(
 		NodeId(synckeygen.our_id().clone()),
 		sks,
@@ -63,7 +79,7 @@ pub fn synckeygen_to_network_info(
 pub fn part_of_address(
 	client: &dyn EngineClient,
 	address: Address,
-	p: Public,
+	vmap: &BTreeMap<Address, Public>,
 	skg: &mut SyncKeyGen<Public, PublicWrapper>,
 ) -> Result<(), CallError> {
 	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
@@ -71,15 +87,19 @@ pub fn part_of_address(
 	println!("Part for address {}: {:?}", address, serialized_part);
 	let deserialized_part: Part = bincode::deserialize(&serialized_part).unwrap();
 	let mut rng = rand::thread_rng();
-	skg.handle_part(&p, deserialized_part, &mut rng).unwrap();
-
+	let outcome = skg
+		.handle_part(vmap.get(&address).unwrap(), deserialized_part, &mut rng)
+		.unwrap();
+	if let PartOutcome::Invalid(fault) = outcome {
+		panic!("Expected Part Outcome to be valid. {}", fault);
+	}
 	Ok(())
 }
 
 pub fn acks_of_address(
 	client: &dyn EngineClient,
 	address: Address,
-	p: Public,
+	vmap: &BTreeMap<Address, Public>,
 	skg: &mut SyncKeyGen<Public, PublicWrapper>,
 ) -> Result<(), CallError> {
 	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
@@ -93,7 +113,12 @@ pub fn acks_of_address(
 		let serialized_ack = call_const_key_history!(c, acks, address, n)?;
 		println!("Ack #{} for address {}: {:?}", n, address, serialized_ack);
 		let deserialized_ack: Ack = bincode::deserialize(&serialized_ack).unwrap();
-		skg.handle_ack(&p, deserialized_ack).unwrap();
+		let outcome = skg
+			.handle_ack(vmap.get(&address).unwrap(), deserialized_ack)
+			.unwrap();
+		if let AckOutcome::Invalid(fault) = outcome {
+			panic!("Expected Ack Outcome to be valid. {}", fault);
+		}
 	}
 
 	Ok(())

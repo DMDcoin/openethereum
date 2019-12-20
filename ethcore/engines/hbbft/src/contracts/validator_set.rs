@@ -37,6 +37,7 @@ pub fn get_validator_pubkeys(
 ) -> Result<BTreeMap<Address, Public>, CallError> {
 	let c = BoundContract::bind(client, BlockId::Latest, *VALIDATOR_SET_ADDRESS);
 	let validators = call_const_validator!(c, get_validators)?;
+	println!("Validators: {:?}", validators);
 	let mut validator_map = BTreeMap::new();
 	for v in validators {
 		let pool_address = staking_by_mining_address(client, v).unwrap();
