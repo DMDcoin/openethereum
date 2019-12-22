@@ -3,6 +3,7 @@ extern crate bincode;
 extern crate clap;
 extern crate client_traits;
 extern crate ethcore;
+extern crate ethereum_types;
 extern crate ethkey;
 extern crate ethstore;
 extern crate hbbft;
@@ -16,13 +17,13 @@ extern crate toml;
 mod keygen_history_helpers;
 
 use clap::{App, Arg};
-use parity_crypto::publickey::{Address, Generator, KeyPair, Public, Random, Secret};
 use ethstore::{KeyFile, SafeAccount};
 use hbbft::crypto::serde_impl::SerdeSecret;
 use hbbft::sync_key_gen::SyncKeyGen;
 use keygen_history_helpers::{
 	enodes_to_pub_keys, generate_keygens, key_sync_history_data, KeyPairWrapper,
 };
+use parity_crypto::publickey::{Address, Generator, KeyPair, Public, Random, Secret};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -236,12 +237,7 @@ where
 	mining.insert("reseal_min_period".into(), Value::Integer(0));
 
 	let mut misc = Map::new();
-	misc.insert(
-		"logging".into(),
-		Value::String(
-			"engine=trace,miner=trace,reward=trace,consensus=trace,network=trace,sync=trace,poa=trace".into(),
-		),
-	);
+	misc.insert("logging".into(), Value::String("".into()));
 	misc.insert("log_file".into(), Value::String("parity.log".into()));
 
 	let mut map = Map::new();
@@ -376,8 +372,11 @@ fn main() {
 	// Write the password file
 	fs::write("password.txt", "test").expect("Unable to write password.txt file");
 
-	fs::write("keygen_history.json", key_sync_history_data(parts, acks))
-		.expect("Unable to write keygen history data file");
+	fs::write(
+		"keygen_history.json",
+		key_sync_history_data(parts, acks, enodes_map),
+	)
+	.expect("Unable to write keygen history data file");
 }
 
 #[cfg(test)]

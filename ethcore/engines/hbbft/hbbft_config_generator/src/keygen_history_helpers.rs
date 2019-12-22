@@ -1,6 +1,7 @@
 use crate::Enode;
-use parity_crypto::publickey::{Address, Public, Secret, public_to_address};
+use ethereum_types::H128;
 use hbbft::sync_key_gen::{AckOutcome, Part, PartOutcome, PublicKey, SecretKey, SyncKeyGen};
+use parity_crypto::publickey::{public_to_address, Address, Public, Secret};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -36,11 +37,11 @@ pub fn generate_keygens<R: rand::Rng>(
 	t: usize,
 ) -> (
 	Vec<SyncKeyGen<Public, KeyPairWrapper>>,
-	Vec<(Public, Part)>,
-	Vec<(Public, PartOutcome)>,
+	BTreeMap<Public, Part>,
+	BTreeMap<Public, Vec<PartOutcome>>,
 ) {
 	// Get SyncKeyGen and Parts
-	let (mut sync_keygen, parts): (Vec<_>, Vec<_>) = key_pairs
+	let (mut sync_keygen, parts): (Vec<_>, BTreeMap<_, _>) = key_pairs
 		.iter()
 		.map(|(n, kp)| {
 			let s = SyncKeyGen::new(n.clone(), kp.clone(), key_pairs.clone(), t, &mut rng).unwrap();
@@ -49,18 +50,16 @@ pub fn generate_keygens<R: rand::Rng>(
 		.unzip();
 
 	// All SyncKeyGen process all parts, returning Acks
-	let acks: Vec<_> = sync_keygen
+	let acks: BTreeMap<_, _> = sync_keygen
 		.iter_mut()
-		.flat_map(|s| {
-			parts
-				.iter()
-				.map(|(n, p)| {
-					(
-						s.our_id().clone(),
-						s.handle_part(n, p.clone(), &mut rng).unwrap(),
-					)
-				})
-				.collect::<Vec<_>>()
+		.map(|s| {
+			(
+				s.our_id().clone(),
+				parts
+					.iter()
+					.map(|(n, p)| s.handle_part(n, p.clone(), &mut rng).unwrap())
+					.collect::<Vec<_>>(),
+			)
 		})
 		.collect();
 
@@ -69,9 +68,16 @@ pub fn generate_keygens<R: rand::Rng>(
 		.iter_mut()
 		.flat_map(|s| {
 			acks.iter()
-				.map(|(n, p)| match p {
-					PartOutcome::Valid(a) => s.handle_ack(n, a.as_ref().unwrap().clone()).unwrap(),
-					_ => panic!("Expected Part Outcome to be valid"),
+				.flat_map(|(n, p_outcomes)| {
+					p_outcomes
+						.iter()
+						.map(|p| match p {
+							PartOutcome::Valid(a) => {
+								s.handle_ack(n, a.as_ref().unwrap().clone()).unwrap()
+							}
+							_ => panic!("Expected Part Outcome to be valid"),
+						})
+						.collect::<Vec<_>>()
 				})
 				.collect::<Vec<_>>()
 		})
@@ -108,17 +114,26 @@ pub fn enodes_to_pub_keys(
 
 #[derive(Serialize, Deserialize)]
 struct KeyGenHistoryData {
-	parts: BTreeMap<Address, Vec<u8>>,
-	acks: BTreeMap<Address, Vec<Vec<u8>>>,
+	validators: Vec<String>,
+	staking_addresses: Vec<String>,
+	public_keys: Vec<String>,
+	ip_addresses: Vec<String>,
+	parts: Vec<Vec<u8>>,
+	acks: Vec<Vec<Vec<u8>>>,
 }
 
 pub fn key_sync_history_data(
-	parts: Vec<(Public, Part)>,
-	acks: Vec<(Public, PartOutcome)>,
+	parts: BTreeMap<Public, Part>,
+	acks: BTreeMap<Public, Vec<PartOutcome>>,
+	enodes: BTreeMap<Public, Enode>,
 ) -> String {
 	let mut data = KeyGenHistoryData {
-		parts: BTreeMap::new(),
-		acks: BTreeMap::new(),
+		validators: Vec::new(),
+		staking_addresses: Vec::new(),
+		public_keys: Vec::new(),
+		ip_addresses: Vec::new(),
+		parts: Vec::new(),
+		acks: Vec::new(),
 	};
 
 	let mut parts_total_bytes = 0;
@@ -126,27 +141,46 @@ pub fn key_sync_history_data(
 	let mut acks_total_bytes = 0;
 	let mut num_acks = 0;
 
-	for p in parts {
-		let serialized = bincode::serialize(&p.1).expect("Part has to serialize");
+	let ids = enodes.keys();
+	let mut staking_counter = 1;
+	// Add Parts and Acks in strict order
+	for id in ids {
+		data.validators.push(format!("{:?}", public_to_address(id)));
+		data.staking_addresses
+			.push(format!("{:?}", Address::from_low_u64_be(staking_counter)));
+		staking_counter += 1;
+		data.public_keys
+			.push(format!("{:?}", enodes.get(id).unwrap().public));
+		data.ip_addresses
+			.push(format!("{:?}", H128::from_low_u64_be(1)));
+
+		// Append to parts vector
+		let part = parts.get(id).unwrap();
+		let serialized = bincode::serialize(part).expect("Part has to serialize");
 		parts_total_bytes += serialized.len();
 		num_parts += 1;
-		data.parts.insert(public_to_address(&p.0), serialized);
-	}
-	for a in acks {
-		match a.1 {
-			PartOutcome::Valid(ack_option) => {
-				if let Some(ack) = ack_option {
-					let v = data.acks.entry(public_to_address(&a.0)).or_insert(Vec::new());
-					let ack_serialized = bincode::serialize(&ack).expect("Ack has to serialize");
-					acks_total_bytes += ack_serialized.len();
-					num_acks += 1;
-					v.push(ack_serialized);
-				} else {
-					panic!("Unexpected valid part outcome without Ack message");
-				}
-			}
-			_ => panic!("Expected Part Outcome to be valid"),
-		}
+		data.parts.push(serialized);
+
+		// Append to parts vector of vectors
+		let acks = acks.get(id).unwrap();
+		data.acks.push(
+			acks.iter()
+				.map(|outcome| match outcome {
+					PartOutcome::Valid(ack_option) => {
+						if let Some(ack) = ack_option {
+							let ack_serialized =
+								bincode::serialize(&ack).expect("Ack has to serialize");
+							acks_total_bytes += ack_serialized.len();
+							num_acks += 1;
+							ack_serialized
+						} else {
+							panic!("Unexpected valid part outcome without Ack message")
+						}
+					}
+					_ => panic!("Expected Part Outcome to be valid"),
+				})
+				.collect(),
+		);
 	}
 
 	println!(

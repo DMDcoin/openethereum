@@ -207,10 +207,10 @@ impl HoneyBadgerBFT {
 			Err(_) => return None,
 		};
 
-		for v in vmap.keys() {
+		for v in vmap.keys().sorted() {
 			assert!(part_of_address(&*client, *v, &vmap, &mut synckeygen).is_ok());
 		}
-		for v in vmap.keys() {
+		for v in vmap.keys().sorted() {
 			assert!(acks_of_address(&*client, *v, &vmap, &mut synckeygen).is_ok());
 		}
 		assert!(synckeygen.is_ready());
