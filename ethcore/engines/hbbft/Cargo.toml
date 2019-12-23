@@ -22,7 +22,7 @@ ethcore-io = { path = "../../../util/io" }
 ethcore-miner = { path = "../../../miner" }
 ethereum-types = "0.8.0"
 ethjson = { path = "../../../json" }
-hbbft = { git = "https://github.com/poanetwork/hbbft", rev = "a652ca1eb584b34d1a49750acda1cb5d68df459a" }
+hbbft = { git = "https://github.com/poanetwork/hbbft", rev = "4857b7f9c7a0f513caca97c308d352c6a77fe5c2" }
 hbbft_testing = { git = "https://github.com/poanetwork/hbbft" }
 hex_fmt = "0.3.0"
 itertools = "0.5"
