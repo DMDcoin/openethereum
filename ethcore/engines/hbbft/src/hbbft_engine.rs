@@ -194,7 +194,6 @@ impl HoneyBadgerBFT {
 	}
 
 	fn try_init_honey_badger(&self) -> Option<()> {
-		let _our_id = NodeId((self.signer.read().as_ref()?).public()?);
 		let client = self.client_arc()?;
 		let vmap = get_validator_pubkeys(&*client).ok()?;
 
@@ -202,10 +201,9 @@ impl HoneyBadgerBFT {
 			.values()
 			.map(|p| (*p, PublicWrapper { inner: p.clone() }))
 			.collect();
-		let mut synckeygen = match engine_signer_to_synckeygen(&self.signer, Arc::new(pub_keys)) {
-			Ok((skg, _)) => skg,
-			Err(_) => return None,
-		};
+
+		let (mut synckeygen, _) =
+			engine_signer_to_synckeygen(&self.signer, Arc::new(pub_keys)).ok()?;
 
 		for v in vmap.keys().sorted() {
 			assert!(part_of_address(&*client, *v, &vmap, &mut synckeygen).is_ok());
@@ -214,9 +212,14 @@ impl HoneyBadgerBFT {
 			assert!(acks_of_address(&*client, *v, &vmap, &mut synckeygen).is_ok());
 		}
 		assert!(synckeygen.is_ready());
-		let network_info = synckeygen_to_network_info(&synckeygen)?;
+		let (pks, sks) = synckeygen.generate().ok()?;
+		*self.public_master_key.write() = Some(pks.public_key());
+		if sks.is_none() {
+			info!(target: "engine", "We are not part of the HoneyBadger validator set - running as regular node.");
+			return Some(());
+		}
 
-		*self.public_master_key.write() = Some(network_info.public_key_set().public_key());
+		let network_info = synckeygen_to_network_info(&synckeygen, pks, sks)?;
 		*self.network_info.write() = Some(network_info.clone());
 		*self.honey_badger.write() = Some(self.new_honey_badger(network_info)?);
 
@@ -548,14 +551,15 @@ impl Engine for HoneyBadgerBFT {
 	fn register_client(&self, client: Weak<dyn EngineClient>) {
 		*self.client.write() = Some(client.clone());
 		if let None = self.try_init_honey_badger() {
-			info!(target: "engine", "HoneyBadger Algorithm could not be created - running as regular node.");
+			// As long as the client is set we should be able to initialize as a regular node.
+			error!(target: "engine", "Error during HoneyBadger initialization!");
 		}
 	}
 
 	fn set_signer(&self, signer: Option<Box<dyn EngineSigner>>) {
 		*self.signer.write() = signer;
 		if let None = self.try_init_honey_badger() {
-			info!(target: "engine", "HoneyBadger Algorithm could not be created - running as regular node.");
+			info!(target: "engine", "HoneyBadger Algorithm could not be created, Client possibly not set yet.");
 		}
 	}
 

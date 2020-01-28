@@ -6,9 +6,9 @@ use ethcore::miner::{Miner, MinerService};
 use ethcore::test_helpers::generate_dummy_client_with_spec;
 use ethcore::test_helpers::TestNotify;
 use ethereum_types::U256;
-use ethkey::{Generator, KeyPair, Public, Random};
 use hbbft::crypto::serde_impl::SerdeSecret;
 use hbbft::NetworkInfo;
+use parity_crypto::publickey::{Generator, KeyPair, Public, Random};
 use rustc_hex::FromHex;
 use spec::Spec;
 use std::collections::BTreeMap;
@@ -55,7 +55,7 @@ pub fn hbbft_client_setup_from_contracts(keypair: KeyPair) -> HbbftTestData {
 	let miner = client.miner();
 	let engine = client.engine();
 	let signer = from_keypair(keypair);
-	engine.set_signer(signer);
+	engine.set_signer(Some(signer));
 	engine.register_client(Arc::downgrade(&client) as _);
 	let notify = Arc::new(TestNotify::default());
 	client.add_notify(notify.clone());
@@ -82,7 +82,7 @@ pub fn hbbft_client_setup(
 	let engine = client.engine();
 	// Set the signer *before* registering the client with the engine.
 	let signer = from_keypair(keypair);
-	engine.set_signer(signer);
+	engine.set_signer(Some(signer));
 	engine.register_client(Arc::downgrade(&client) as _);
 
 	// Register notify object for capturing consensus messages

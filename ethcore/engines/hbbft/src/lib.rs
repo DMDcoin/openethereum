@@ -8,11 +8,11 @@ extern crate ethabi_contract;
 extern crate ethcore_io as io;
 extern crate ethcore_miner;
 extern crate ethereum_types;
-extern crate parity_crypto;
 extern crate hbbft;
 extern crate hbbft_testing;
 extern crate itertools;
 extern crate keccak_hash as hash;
+extern crate parity_crypto;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
@@ -44,9 +44,9 @@ mod hbbft_engine;
 mod sealing;
 mod utils;
 
-use std::fmt;
-use parity_crypto::publickey::Public;
 pub use hbbft_engine::HoneyBadgerBFT;
+use parity_crypto::publickey::Public;
+use std::fmt;
 
 #[derive(Clone, Copy, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct NodeId(pub Public);
@@ -71,14 +71,14 @@ mod tests {
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
 	use ethereum_types::H256;
-	use ethkey::{KeyPair, Public, Secret};
 	use hash::keccak;
 	use hbbft::NetworkInfo;
 	use hbbft_testing::proptest::{gen_seed, TestRng, TestRngSeed};
+	use parity_crypto::publickey::{KeyPair, Public, Secret};
 	use proptest::{prelude::ProptestConfig, proptest};
 	use rand::{Rng, SeedableRng};
-	use rustc_hex::FromHex;
 	use std::collections::BTreeMap;
+	use std::str::FromStr;
 
 	fn generate_nodes<R: Rng>(size: usize, rng: &mut R) -> BTreeMap<Public, HbbftTestData> {
 		let keypairs: Vec<KeyPair> = (1..=size)
@@ -103,11 +103,10 @@ mod tests {
 	}
 
 	fn generate_for_spec() -> HbbftTestData {
-		let secret = "49c437676c600660905204e5f3710a6db5d3f46e3da9ba5168b9d34b0b787317"
-			.from_hex()
-			.unwrap();
-		let keypair = KeyPair::from_secret(Secret::from_slice(&secret).unwrap())
-			.expect("KeyPair generation must succeed");
+		let secret =
+			Secret::from_str("49c437676c600660905204e5f3710a6db5d3f46e3da9ba5168b9d34b0b787317")
+				.unwrap();
+		let keypair = KeyPair::from_secret(secret).expect("KeyPair generation must succeed");
 		hbbft_client_setup_from_contracts(keypair)
 	}
 
@@ -164,18 +163,21 @@ mod tests {
 		})]
 
 		#[test]
+		#[ignore]
 		#[allow(clippy::unnecessary_operation)]
 		fn test_two_clients(seed in gen_seed()) {
 			do_test_two_clients(seed)
 		}
 
 		#[test]
+		#[ignore]
 		#[allow(clippy::unnecessary_operation)]
 		fn test_multiple_clients(seed in gen_seed()) {
 			do_test_multiple_clients(seed)
 		}
 
 		#[test]
+		#[ignore]
 		#[allow(clippy::unnecessary_operation)]
 		fn test_trigger_at_contribution_threshold(seed in gen_seed()) {
 			do_test_trigger_at_contribution_threshold(seed)

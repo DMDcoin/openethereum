@@ -2,7 +2,8 @@ use crate::NodeId;
 use client_traits::EngineClient;
 use common_types::ids::BlockId;
 use engine::signer::EngineSigner;
-use ethereum_types::Address;
+use ethereum_types::{Address, H512};
+use hbbft::crypto::{PublicKeySet, SecretKeyShare};
 use hbbft::sync_key_gen::{
 	Ack, AckOutcome, Error, Part, PartOutcome, PubKeyMap, PublicKey, SecretKey, SyncKeyGen,
 };
@@ -35,12 +36,12 @@ pub fn engine_signer_to_synckeygen<'a>(
 	let wrapper = KeyPairWrapper {
 		inner: signer.clone(),
 	};
-	let public = signer
-		.read()
-		.as_ref()
-		.expect("Signer must be set!")
-		.public()
-		.expect("Signer's public key must be available!");
+	let public = match signer.read().as_ref() {
+		Some(signer) => signer
+			.public()
+			.expect("Signer's public key must be available!"),
+		None => Public::from(H512::from_low_u64_be(0)),
+	};
 	let mut rng = rand::thread_rng();
 	let num_nodes = pub_keys.len();
 	SyncKeyGen::new(public, wrapper, pub_keys, max_faulty(num_nodes), &mut rng)
@@ -48,8 +49,9 @@ pub fn engine_signer_to_synckeygen<'a>(
 
 pub fn synckeygen_to_network_info(
 	synckeygen: &SyncKeyGen<Public, PublicWrapper>,
+	pks: PublicKeySet,
+	sks: Option<SecretKeyShare>,
 ) -> Option<NetworkInfo<NodeId>> {
-	let (pks, sks) = synckeygen.generate().ok()?;
 	let pub_keys = synckeygen
 		.public_keys()
 		.keys()
@@ -57,7 +59,6 @@ pub fn synckeygen_to_network_info(
 		.collect::<Vec<_>>();
 	println!("Creating Network Info");
 	println!("pub_keys: {:?}", pub_keys);
-	println!("synckeygen.our_id: {}", synckeygen.our_id());
 	println!(
 		"pks: {:?}",
 		(0..(pub_keys.len()))
@@ -152,6 +153,7 @@ impl<'a> SecretKey for KeyPairWrapper {
 		self.inner
 			.read()
 			.as_ref()
+			.ok_or(parity_crypto::publickey::Error::InvalidSecretKey)
 			.expect("Signer must be set!")
 			.decrypt(b"", ct)
 	}
@@ -161,19 +163,17 @@ impl<'a> SecretKey for KeyPairWrapper {
 mod tests {
 	use super::*;
 	use engine::signer::{from_keypair, EngineSigner};
-	use ethkey::{KeyPair, Secret};
-	use rustc_hex::FromHex;
+	use parity_crypto::publickey::{KeyPair, Secret};
 	use std::collections::BTreeMap;
 	use std::sync::Arc;
 
 	#[test]
 	fn test_synckeygen_initialization() {
 		// Create a keypair
-		let secret = "49c437676c600660905204e5f3710a6db5d3f46e3da9ba5168b9d34b0b787317"
-			.from_hex()
-			.unwrap();
-		let keypair = KeyPair::from_secret(Secret::from_slice(&secret).unwrap())
-			.expect("KeyPair generation must succeed");
+		let secret =
+			Secret::from_str("49c437676c600660905204e5f3710a6db5d3f46e3da9ba5168b9d34b0b787317")
+				.unwrap();
+		let keypair = KeyPair::from_secret(secret).expect("KeyPair generation must succeed");
 		let public = keypair.public().clone();
 		let wrapper = PublicWrapper {
 			inner: public.clone(),
