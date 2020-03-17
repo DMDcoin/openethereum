@@ -16,11 +16,10 @@
 
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::io::{self, Read, Write};
+use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::ops::*;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
@@ -34,7 +33,6 @@ use mio::{
 	Token,
 	udp::UdpSocket
 };
-use parity_path::restrict_permissions_owner;
 use parking_lot::{Mutex, RwLock};
 use rlp::{Encodable, RlpStream};
 
@@ -49,6 +47,7 @@ use network::{
 use crate::{
 	connection::PAYLOAD_SOFT_LIMIT,
 	discovery::{Discovery, MAX_DATAGRAM_SIZE, NodeEntry, TableUpdates},
+	disk::{save, load},
 	ip_utils::{map_external_address, select_public_address},
 	node_table::*,
 	PROTOCOL_VERSION,
@@ -288,11 +287,11 @@ impl Host {
 		let keys = if let Some(ref secret) = config.use_secret {
 			KeyPair::from_secret(secret.clone())?
 		} else {
-			config.config_path.clone().and_then(|ref p| load_key(Path::new(&p)))
+			config.config_path.clone().and_then(|ref p| load(Path::new(&p)))
 				.map_or_else(|| {
 				let key = Random.generate();
 				if let Some(path) = config.config_path.clone() {
-					save_key(Path::new(&path), key.secret());
+					save(Path::new(&path), key.secret());
 				}
 				key
 			},
@@ -1216,67 +1215,6 @@ impl IoHandler<NetworkIoMessage> for Host {
 			_ => warn!("Unexpected stream update")
 		}
 	}
-}
-
-fn save_key(path: &Path, key: &Secret) {
-	let mut path_buf = PathBuf::from(path);
-	if let Err(e) = fs::create_dir_all(path_buf.as_path()) {
-		warn!("Error creating key directory: {:?}", e);
-		return;
-	};
-	path_buf.push("key");
-	let path = path_buf.as_path();
-	let mut file = match fs::File::create(&path) {
-		Ok(file) => file,
-		Err(e) => {
-			warn!("Error creating key file: {:?}", e);
-			return;
-		}
-	};
-	if let Err(e) = restrict_permissions_owner(path, true, false) {
-		warn!(target: "network", "Failed to modify permissions of the file ({})", e);
-	}
-	if let Err(e) = file.write(&key.to_hex().into_bytes()) {
-		warn!("Error writing key file: {:?}", e);
-	}
-}
-
-fn load_key(path: &Path) -> Option<Secret> {
-	let mut path_buf = PathBuf::from(path);
-	path_buf.push("key");
-	let mut file = match fs::File::open(path_buf.as_path()) {
-		Ok(file) => file,
-		Err(e) => {
-			debug!("Error opening key file: {:?}", e);
-			return None;
-		}
-	};
-	let mut buf = String::new();
-	match file.read_to_string(&mut buf) {
-		Ok(_) => {},
-		Err(e) => {
-			warn!("Error reading key file: {:?}", e);
-			return None;
-		}
-	}
-	match Secret::from_str(&buf) {
-		Ok(key) => Some(key),
-		Err(e) => {
-			warn!("Error parsing key file: {:?}", e);
-			None
-		}
-	}
-}
-
-#[test]
-fn key_save_load() {
-	use tempdir::TempDir;
-
-	let tempdir = TempDir::new("").unwrap();
-	let key = H256::random().into();
-	save_key(tempdir.path(), &key);
-	let r = load_key(tempdir.path());
-	assert_eq!(key, r.unwrap());
 }
 
 #[test]

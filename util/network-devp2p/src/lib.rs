@@ -65,6 +65,7 @@ pub use host::NetworkContext;
 pub use node_table::{MAX_NODES_IN_TABLE, NodeId, validate_node_url};
 pub use service::NetworkService;
 
+mod disk;
 mod host;
 mod connection;
 mod handshake;
