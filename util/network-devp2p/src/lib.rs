@@ -72,6 +72,7 @@ mod handshake;
 mod session;
 mod discovery;
 mod service;
+mod node_record;
 mod node_table;
 mod ip_utils;
 

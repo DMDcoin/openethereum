@@ -49,6 +49,7 @@ use crate::{
 	discovery::{Discovery, MAX_DATAGRAM_SIZE, NodeEntry, TableUpdates},
 	disk::{save, load},
 	ip_utils::{map_external_address, select_public_address},
+	node_record::*,
 	node_table::*,
 	PROTOCOL_VERSION,
 	session::{Session, SessionData}
@@ -217,6 +218,8 @@ impl<'s> NetworkContextTrait for NetworkContext<'s> {
 pub struct HostInfo {
 	/// Our private and public keys.
 	keys: KeyPair,
+	/// Node record.
+	enr: EnrManager,
 	/// Current network configuration
 	config: NetworkConfiguration,
 	/// Connection nonce.
@@ -284,11 +287,13 @@ impl Host {
 			Some(addr) => addr,
 		};
 
+		let mut key_created = false;
 		let keys = if let Some(ref secret) = config.use_secret {
 			KeyPair::from_secret(secret.clone())?
 		} else {
 			config.config_path.clone().and_then(|ref p| load(Path::new(&p)))
 				.map_or_else(|| {
+				key_created = true;
 				let key = Random.generate();
 				if let Some(path) = config.config_path.clone() {
 					save(Path::new(&path), key.secret());
@@ -297,6 +302,15 @@ impl Host {
 			},
 			|s| KeyPair::from_secret(s).expect("Error creating node secret key"))
 		};
+		let mut enr = None;
+		if !key_created {
+			if let Some(path) = &config.config_path {
+				if let Some(data) = load(Path::new(&path)) {
+					enr = EnrManager::load(keys.secret().clone(), data);
+				}
+			}
+		}
+		let enr = enr.unwrap_or_else(|| EnrManager::new(keys.secret().clone(), 0).expect("Key is always valid; qed"));
 		let path = config.net_config_path.clone();
 		// Setup the server socket
 		let tcp_listener = TcpListener::bind(&listen_address)?;
@@ -312,6 +326,7 @@ impl Host {
 		let mut host = Host {
 			info: RwLock::new(HostInfo {
 				keys,
+				enr,
 				config,
 				nonce: H256::random(),
 				protocol_version: PROTOCOL_VERSION,
@@ -474,7 +489,11 @@ impl Host {
 			Some(addr) => NodeEndpoint { address: addr, udp_port: local_endpoint.udp_port }
 		};
 
-		self.info.write().public_endpoint = Some(public_endpoint.clone());
+		{
+			let mut info = self.info.write();
+			info.public_endpoint = Some(public_endpoint.clone());
+			info.enr.set_node_endpoint(&public_endpoint);
+		}
 
 		if let Some(url) = self.external_url() {
 			io.message(NetworkIoMessage::NetworkStarted(url)).unwrap_or_else(|e| warn!("Error sending IO notification: {:?}", e));
@@ -484,7 +503,7 @@ impl Host {
 		let discovery = {
 			let info = self.info.read();
 			if info.config.discovery_enabled && info.config.non_reserved_mode == NonReservedPeerMode::Accept {
-				Some(Discovery::new(&info.keys, public_endpoint, allow_ips))
+				Some(Discovery::new(&info.keys, public_endpoint, info.enr.as_enr().clone(), allow_ips))
 			} else { None }
 		};
 
