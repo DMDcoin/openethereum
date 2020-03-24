@@ -145,11 +145,12 @@ where
 		}
 		None => {
 			network.insert("nat".into(), Value::String("none".into()));
-			network.insert("interface".into(), Value::String("local".into()));
+			network.insert("interface".into(), Value::String("all".into()));
 		}
 	}
 
 	let mut rpc = Map::new();
+	rpc.insert("interface".into(), Value::String("all".into()));
 	rpc.insert("cors".into(), to_toml_array(vec!["all"]));
 	rpc.insert("hosts".into(), to_toml_array(vec!["all"]));
 	let apis = to_toml_array(vec![
