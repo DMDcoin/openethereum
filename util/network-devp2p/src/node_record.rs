@@ -20,6 +20,8 @@ use crate::{disk::DiskEntity, node_table::NodeEndpoint};
 
 pub type Enr = enr::Enr<secp256k1::SecretKey>;
 
+const ENR_VERSION: &str = "v4";
+
 pub struct EnrManager {
 	secret: secp256k1::SecretKey,
 	inner: Enr,
@@ -29,7 +31,7 @@ pub struct EnrManager {
 impl EnrManager {
     pub fn new(key: Secret, seq: u64) -> Option<Self> {
 		let secret = key.to_secp256k1_secret().ok()?;
-		let mut b = enr::EnrBuilder::new("v4");
+		let mut b = enr::EnrBuilder::new(ENR_VERSION);
 		b.seq(seq);
 		let inner = b.build(&secret).ok()?;
 		Some(Self { secret, inner })
