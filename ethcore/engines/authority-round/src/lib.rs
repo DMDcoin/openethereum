@@ -57,7 +57,7 @@ use io::{IoContext, IoHandler, TimerToken, IoService};
 use itertools::{self, Itertools};
 use rand::rngs::OsRng;
 use rlp::{encode, Decodable, DecoderError, Encodable, RlpStream, Rlp};
-use ethereum_types::{H256, H520, Address, U128, U256};
+use ethereum_types::{H256, H512, H520, Address, U128, U256};
 use parity_bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 use time_utils::CheckedSystemTime;
@@ -1372,7 +1372,7 @@ impl Engine for AuthorityRound {
 	}
 
 	/// Handle incoming EmptyStep messages from the `Client`.
-	fn handle_message(&self, rlp: &[u8]) -> Result<(), EngineError> {
+	fn handle_message(&self, rlp: &[u8], _node_id: Option<H512>) -> Result<(), EngineError> {
 		fn fmt_err<T: fmt::Debug>(x: T) -> EngineError {
 			EngineError::MalformedMessage(format!("{:?}", x))
 		}

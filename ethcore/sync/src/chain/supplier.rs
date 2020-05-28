@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 use crate::sync_io::SyncIo;
 
 use bytes::Bytes;
-use num_traits::FromPrimitive;
-use ethereum_types::H256;
+use enum_primitive::FromPrimitive;
+use ethereum_types::{H256, H512};
 use log::{debug, trace, warn};
 use network::{self, PeerId};
 use parking_lot::RwLock;
@@ -69,7 +69,7 @@ impl SyncSupplier {
 	/// Dispatch incoming requests and responses
 	// Take a u8 and not a SyncPacketId because this is the entry point
 	// to chain sync from the outside world.
-	pub fn dispatch_packet(sync: &RwLock<ChainSync>, io: &mut dyn SyncIo, peer: PeerId, packet_id: u8, data: &[u8]) {
+	pub fn dispatch_packet(sync: &RwLock<ChainSync>, io: &mut dyn SyncIo, peer: PeerId, packet_id: u8, data: &[u8], node_id: Option<H512>) {
 		let rlp = Rlp::new(data);
 
 		if let Some(id) = SyncPacket::from_u8(packet_id) {
@@ -123,7 +123,7 @@ impl SyncSupplier {
 
 					match id {
 						ConsensusDataPacket => {
-							SyncHandler::on_consensus_packet(io, peer, &rlp)
+							SyncHandler::on_consensus_packet(io, peer, &rlp, node_id)
 						},
 						TransactionsPacket => {
 							let res = {
@@ -564,7 +564,7 @@ mod test {
 
 		io.sender = Some(2usize);
 
-		SyncSupplier::dispatch_packet(&RwLock::new(sync), &mut io, 0usize, GetNodeDataPacket.id(), &node_request);
+		SyncSupplier::dispatch_packet(&RwLock::new(sync), &mut io, 0usize, GetNodeDataPacket.id(), &node_request, None);
 		assert_eq!(1, io.packets.len());
 	}
 
@@ -606,7 +606,7 @@ mod test {
 		assert_eq!(603, rlp_result.unwrap().1.out().len());
 
 		io.sender = Some(2usize);
-		SyncSupplier::dispatch_packet(&RwLock::new(sync), &mut io, 0usize, GetReceiptsPacket.id(), &receipts_request);
+		SyncSupplier::dispatch_packet(&RwLock::new(sync), &mut io, 0usize, GetReceiptsPacket.id(), &receipts_request, None);
 		assert_eq!(1, io.packets.len());
 	}
 }

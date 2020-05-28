@@ -46,7 +46,7 @@ use common_types::{
 	tree_route::TreeRoute,
 	verification::{VerificationQueueInfo, Unverified},
 };
-use ethereum_types::{Address, H256, U256};
+use ethereum_types::{Address, H256, H512, U256};
 use ethcore_db::keys::BlockReceipts;
 use ethcore_miner::pool::VerifiedTransaction;
 use kvdb::DBValue;
@@ -165,6 +165,9 @@ pub trait EngineClient: Sync + Send + ChainInfo {
 	/// Broadcast a consensus message to the network.
 	fn broadcast_consensus_message(&self, message: Bytes);
 
+	/// Send a consensus message to the specified peer
+	fn send_consensus_message(&self, message: Bytes, node_id: Option<H512>);
+
 	/// Get the transition to the epoch the given parent hash is part of
 	/// or transitions to.
 	/// This will give the epoch that any children of this parent belong to.
@@ -201,7 +204,7 @@ pub trait IoClient: Sync + Send {
 	fn queue_ancient_block(&self, unverified: Unverified, receipts_bytes: Bytes) -> EthcoreResult<H256>;
 
 	/// Queue consensus engine message.
-	fn queue_consensus_message(&self, message: Bytes);
+	fn queue_consensus_message(&self, message: Bytes, node_id: Option<H512>);
 }
 
 /// Implement this for clients that need logic to decide when/how to advance.
@@ -536,6 +539,11 @@ pub trait ChainNotify: Send + Sync {
 
 	/// fires when chain broadcasts a message
 	fn broadcast(&self, _message_type: ChainMessageType) {
+		// does nothing by default
+	}
+
+	/// fires when chain sends a message to a specific peer
+	fn send(&self, _message_type: ChainMessageType, _node_id: Option<H512>) {
 		// does nothing by default
 	}
 
