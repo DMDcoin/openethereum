@@ -36,7 +36,7 @@ use common_types::{
 };
 use client_traits::EngineClient;
 
-use ethereum_types::{H256, U256, Address};
+use ethereum_types::{H256, H512, U256, Address};
 use parity_crypto::publickey::Signature;
 use machine::{
 	Machine,
@@ -306,7 +306,7 @@ pub trait Engine: Sync + Send {
 
 	/// Handle any potential consensus messages;
 	/// updating consensus state and potentially issuing a new one.
-	fn handle_message(&self, _message: &[u8]) -> Result<(), EngineError> { Err(EngineError::UnexpectedMessage) }
+	fn handle_message(&self, _message: &[u8], _node_id: Option<H512>) -> Result<(), EngineError> { Err(EngineError::UnexpectedMessage) }
 
 	/// Register a component which signs consensus messages.
 	fn set_signer(&self, _signer: Option<Box<dyn EngineSigner>>) {}
