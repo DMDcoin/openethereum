@@ -410,6 +410,12 @@ pub trait Engine: Sync + Send {
 	fn min_gas_limit(&self) -> U256 {
 		self.params().min_gas_limit
 	}
+
+	/// Whether the miner should prepare blocks for sealing for this engine.
+	fn should_miner_prepare_blocks(&self) -> bool { true }
+
+	/// Use the author as signer as well as block author.
+	fn use_block_author(&self) -> bool { true }
 }
 
 /// Verifier for all blocks within an epoch with self-contained state.

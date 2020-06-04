@@ -37,6 +37,7 @@ use common_types::{
 	header::Header,
 	ids::BlockId,
 	io_message::ClientIoMessage,
+	transaction::SignedTransaction,
 	verification::VerificationQueueInfo as BlockQueueInfo,
 };
 use kvdb::KeyValueDB;
@@ -624,6 +625,13 @@ impl<T: ChainDataFetcher> client_traits::EngineClient for Client<T> {
 
 	fn block_header(&self, id: BlockId) -> Option<encoded::Header> {
 		Client::block_header(self, id)
+	}
+
+	fn create_pending_block_at(&self, _txns: Vec<SignedTransaction>, _timestamp: u64, _block_number: u64)
+							   -> Option<Header>
+	{
+		warn!(target: "client", "No miner available in light clients.");
+		None
 	}
 }
 
