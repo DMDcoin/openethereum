@@ -56,7 +56,7 @@ use types::{
 };
 use using_queue::{UsingQueue, GetAction};
 
-use block::{ClosedBlock, SealedBlock};
+use block::{ClosedBlock, OpenBlock, SealedBlock};
 use client::{BlockProducer, SealedBlockImporter, Client};
 use client_traits::{BlockChain, ChainInfo, Nonce, TransactionInfo, EngineClient, ForceUpdateSealing};
 use engine::{Engine, signer::EngineSigner};
@@ -422,6 +422,38 @@ impl Miner {
 		)
 	}
 
+	/// Returns a newly created block and transactions requested by the Engine for insertion.
+	fn create_open_block<'a, C>(&self, chain: &'a C) -> Option<(OpenBlock<'a>, Vec<SignedTransaction>)>
+		where C: BlockChain + CallContract + BlockProducer + Nonce + Sync {
+		let params = self.params.read().clone();
+
+		let block = match chain.prepare_open_block(
+			if self.engine.use_block_author() { params.author } else { Address::zero() },
+			params.gas_range_target,
+			params.extra_data,
+		) {
+			Ok(block) => block,
+			Err(err) => {
+				warn!(target: "miner", "Open new block failed with error {:?}. This is likely an error in \
+								  chain specification or on-chain consensus smart contracts.", err);
+				return None;
+			}
+		};
+
+		// Before adding from the queue to the new block, give the engine a chance to add transactions.
+		let engine_pending = match self.engine.generate_engine_transactions(&block) {
+			Ok(transactions) => transactions,
+			Err(err) => {
+				error!(target: "miner", "Failed to prepare engine transactions for new block: {:?}. \
+								   This is likely an error in chain specification or on-chain consensus smart \
+								   contracts.", err);
+				return None;
+			}
+		};
+
+		Some((block, engine_pending))
+	}
+
 	/// Prepares new block for sealing including top transactions from queue.
 	fn prepare_block<C>(&self, chain: &C) -> Option<(ClosedBlock, Option<H256>)> where
 		C: BlockChain + CallContract + BlockProducer + Nonce + Sync,
@@ -445,37 +477,26 @@ impl Miner {
 			match sealing.queue.get_pending_if(|b| b.header.parent_hash() == &best_hash) {
 				Some(old_block) => {
 					trace!(target: "miner", "prepare_block: Already have previous work; updating and returning");
+
+					// do not attempt to add new transaction to an already existing block if
+					// if the miner should not prepare blocks.
+					if !self.engine.should_miner_prepare_blocks() {
+						return Some((old_block, last_work_hash))
+					}
+
 					// add transactions to old_block
 					(chain.reopen_block(old_block), last_work_hash, Vec::new())
 				}
 				None => {
+					// Do not create block if miner should not prepare blocks.
+					if !self.engine.should_miner_prepare_blocks() {
+						return None
+					}
+
 					// block not found - create it.
 					trace!(target: "miner", "prepare_block: No existing work - making new block");
-					let params = self.params.read().clone();
-
-					let block = match chain.prepare_open_block(
-						params.author,
-						params.gas_range_target,
-						params.extra_data,
-					) {
-						Ok(block) => block,
-						Err(err) => {
-							warn!(target: "miner", "Open new block failed with error {:?}. This is likely an error in \
-								  chain specification or on-chain consensus smart contracts.", err);
-							return None;
-						}
-					};
-
-					// Before adding from the queue to the new block, give the engine a chance to add transactions.
-					match self.engine.generate_engine_transactions(&block) {
-						Ok(transactions) => (block, last_work_hash, transactions),
-						Err(err) => {
-							error!(target: "miner", "Failed to prepare engine transactions for new block: {:?}. \
-								   This is likely an error in chain specification or on-chain consensus smart \
-								   contracts.", err);
-							return None;
-						}
-					}
+					let (block, transactions) = self.create_open_block(chain)?;
+					(block, last_work_hash, transactions)
 				}
 			}
 		};
@@ -483,14 +504,6 @@ impl Miner {
 		if self.options.infinite_pending_block {
 			open_block.remove_gas_limit();
 		}
-
-		let mut invalid_transactions = HashSet::new();
-		let mut not_allowed_transactions = HashSet::new();
-		let mut senders_to_penalize = HashSet::new();
-		let block_number = open_block.header.number();
-
-		let mut tx_count = 0usize;
-		let mut skipped_transactions = 0usize;
 
 		let client = self.pool_client(chain);
 		let engine_params = self.engine.params();
@@ -518,14 +531,38 @@ impl Miner {
 			}
 		);
 
+		debug!(target: "miner", "Attempting to push {} transactions.", engine_txs.len() + queue_txs.len());
+		let opt_block = self.prepare_block_from(open_block, engine_txs.into_iter().chain(queue_txs.into_iter().map(|tx| tx.signed().clone())), chain, min_tx_gas);
+
+		opt_block.map(|block| (block, original_work_hash))
+	}
+
+	/// Prepares new block for sealing including the given transactions.
+	fn prepare_block_from<'a, C: 'a, I>(&self,
+										mut open_block: OpenBlock,
+										pending: I,
+										chain: &C,
+										min_tx_gas: U256
+	) -> Option<ClosedBlock>
+		where C: BlockChain + CallContract, I: IntoIterator<Item = SignedTransaction>
+	{
+		let mut invalid_transactions = HashSet::new();
+		let mut not_allowed_transactions = HashSet::new();
+		let mut senders_to_penalize = HashSet::new();
+		let block_number = open_block.header.number();
+
+		let mut tx_count = 0usize;
+		let mut skipped_transactions = 0usize;
+
+		let client = self.pool_client(chain);
+
 		let took_ms = |elapsed: &Duration| {
 			elapsed.as_secs() * 1000 + elapsed.subsec_nanos() as u64 / 1_000_000
 		};
 
 		let block_start = Instant::now();
-		debug!(target: "miner", "Attempting to push {} transactions.", engine_txs.len() + queue_txs.len());
 
-		for transaction in engine_txs.into_iter().chain(queue_txs.into_iter().map(|tx| tx.signed().clone())) {
+		for transaction in pending {
 			let start = Instant::now();
 
 			let hash = transaction.hash();
@@ -613,7 +650,50 @@ impl Miner {
 			self.transaction_queue.penalize(senders_to_penalize.iter());
 		}
 
-		Some((block, original_work_hash))
+		Some(block)
+	}
+
+	/// Creates a new block and sets it as pending for sealing.
+	/// Returns false if a pending block already exists.
+	pub fn create_pending_block_at<C>(&self, chain: &C, txns: Vec<SignedTransaction>, timestamp: u64, block_number: u64) -> Option<Header>
+		where C: BlockChain + CallContract + BlockProducer + SealedBlockImporter + Nonce + Sync {
+		let mut sealing = self.sealing.lock();
+		let chain_info = chain.chain_info();
+		let parent_block_number = block_number - 1;
+		let parent_header = chain.block_header(BlockId::Number(parent_block_number))?;
+		let parent_hash = parent_header.hash();
+
+		match sealing.queue.get_pending_if(|b| b.header.parent_hash() == &parent_hash) {
+			Some(_) => {
+				trace!(target: "miner", "create_pending_block: Already have a pending block!");
+				None
+			}
+			None => {
+				trace!(target: "miner", "create_pending_block: Making a new block");
+
+				let (mut open_block, engine_pending) = self.create_open_block(chain)?;
+				// Only proceed with blocks at the desired block number.
+				if open_block.header.number() != block_number {
+					return None
+				}
+
+				// Make sure the new timestamp is larger than the parent's timestamp.
+				let parent_timestamp = parent_header.timestamp();
+				let timestamp = cmp::max(timestamp, parent_timestamp + 1);
+				open_block.set_timestamp(timestamp);
+
+				let min_tx_gas: U256 = self.engine.schedule(chain_info.best_block_number).tx_gas.into();
+
+				// Add transactions to the new block
+				let opt_block = self.prepare_block_from(open_block, engine_pending.into_iter().chain(txns.into_iter()), chain, min_tx_gas);
+
+				opt_block.map(|b| {
+					let header = b.header.clone();
+					sealing.queue.set_pending(b);
+					header
+				})
+			}
+		}
 	}
 
 	/// Returns `true` if we should create pending block even if some other conditions are not met.
