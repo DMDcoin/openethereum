@@ -40,6 +40,7 @@ use common_types::{
 	verification::VerificationQueueInfo as BlockQueueInfo,
 };
 use kvdb::KeyValueDB;
+use miner::pool::VerifiedTransaction;
 use vm::EnvInfo;
 
 use self::fetch::ChainDataFetcher;
@@ -624,6 +625,11 @@ impl<T: ChainDataFetcher> client_traits::EngineClient for Client<T> {
 
 	fn block_header(&self, id: BlockId) -> Option<encoded::Header> {
 		Client::block_header(self, id)
+	}
+
+	fn queued_transactions(&self) -> Vec<Arc<VerifiedTransaction>> {
+		warn!(target: "client", "No miner available in light clients.");
+		Vec::new()
 	}
 }
 

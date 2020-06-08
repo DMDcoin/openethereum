@@ -180,6 +180,9 @@ pub trait EngineClient: Sync + Send + ChainInfo {
 
 	/// Get raw block header data by block id.
 	fn block_header(&self, id: BlockId) -> Option<encoded::Header>;
+
+	/// Get currently pending transactions
+	fn queued_transactions(&self) -> Vec<Arc<VerifiedTransaction>>;
 }
 
 /// Provides methods to import block into blockchain
