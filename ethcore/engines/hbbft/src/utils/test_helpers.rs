@@ -1,4 +1,3 @@
-use client_traits::HbbftOptions;
 use common_types::transaction::{Action, SignedTransaction, Transaction};
 use engine::signer::from_keypair;
 use ethcore::client::Client;
@@ -6,12 +5,10 @@ use ethcore::miner::{Miner, MinerService};
 use ethcore::test_helpers::generate_dummy_client_with_spec;
 use ethcore::test_helpers::TestNotify;
 use ethereum_types::U256;
-use hbbft::crypto::serde_impl::SerdeSecret;
 use hbbft::NetworkInfo;
 use parity_crypto::publickey::{Generator, KeyPair, Public, Random};
 use rustc_hex::FromHex;
 use spec::Spec;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub fn hbbft_spec() -> Spec {
@@ -30,24 +27,6 @@ pub struct HbbftTestData {
 	pub client: Arc<Client>,
 	pub notify: Arc<TestNotify>,
 	pub miner: Arc<Miner>,
-}
-
-fn serialize_netinfo(
-	net_info: NetworkInfo<Public>,
-	ips_map: &BTreeMap<Public, String>,
-) -> HbbftOptions {
-	let wrapper = SerdeSecret(net_info.secret_key_share().unwrap());
-	let hbbft_secret_share = serde_json::to_string(&wrapper).unwrap();
-
-	let hbbft_public_key_set = serde_json::to_string(net_info.public_key_set()).unwrap();
-
-	let hbbft_validator_ip_addresses = serde_json::to_string(ips_map).unwrap();
-
-	HbbftOptions {
-		hbbft_secret_share,
-		hbbft_public_key_set,
-		hbbft_validator_ip_addresses,
-	}
 }
 
 pub fn hbbft_client_setup_from_contracts(keypair: KeyPair) -> HbbftTestData {
@@ -70,14 +49,12 @@ pub fn hbbft_client_setup_from_contracts(keypair: KeyPair) -> HbbftTestData {
 pub fn hbbft_client_setup(
 	keypair: KeyPair,
 	net_info: NetworkInfo<Public>,
-	ips_map: &BTreeMap<Public, String>,
 ) -> HbbftTestData {
 	assert_eq!(keypair.public(), net_info.our_id());
 	let client = hbbft_client();
 
 	// Get miner reference
 	let miner = client.miner();
-	miner.set_hbbft_options(serialize_netinfo(net_info, ips_map));
 
 	let engine = client.engine();
 	// Set the signer *before* registering the client with the engine.
@@ -97,7 +74,7 @@ pub fn hbbft_client_setup(
 }
 
 pub fn create_transaction() -> SignedTransaction {
-	let keypair = Random.generate().unwrap();
+	let keypair = Random.generate();
 	Transaction {
 		action: Action::Create,
 		value: U256::zero(),

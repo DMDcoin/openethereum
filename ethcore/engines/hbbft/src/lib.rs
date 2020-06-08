@@ -97,7 +97,7 @@ mod tests {
 			.into_iter()
 			.map(|kp| {
 				let netinfo = net_infos[kp.public()].clone();
-				(*kp.public(), hbbft_client_setup(kp, netinfo, &ips_map))
+				(*kp.public(), hbbft_client_setup(kp, netinfo))
 			})
 			.collect()
 	}
