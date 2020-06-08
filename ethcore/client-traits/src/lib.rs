@@ -184,6 +184,9 @@ pub trait EngineClient: Sync + Send + ChainInfo {
 	/// Get raw block header data by block id.
 	fn block_header(&self, id: BlockId) -> Option<encoded::Header>;
 
+	/// Get currently pending transactions
+	fn queued_transactions(&self) -> Vec<Arc<VerifiedTransaction>>;
+
 	/// Create block and queue it for sealing. Will return None if a block is already pending.
 	fn create_pending_block_at(&self, txns: Vec<SignedTransaction>, timestamp: u64, block_number: u64) -> Option<Header>;
 }
