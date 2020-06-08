@@ -163,6 +163,9 @@ pub trait Engine: Sync + Send {
 	/// Optional maximum gas limit.
 	fn maximum_gas_limit(&self) -> Option<U256> { None }
 
+	/// New transactions were imported to the transaction queue
+	fn on_transactions_imported(&self) {}
+
 	/// Block transformation functions, before the transactions.
 	/// `epoch_begin` set to true if this block kicks off an epoch.
 	fn on_new_block(
