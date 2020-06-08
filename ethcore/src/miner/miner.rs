@@ -1077,8 +1077,11 @@ impl miner::MinerService for Miner {
 		// | NOTE Code below requires sealing locks.                                |
 		// | Make sure to release the locks before calling that method.             |
 		// --------------------------------------------------------------------------
-		if !results.is_empty() && self.options.reseal_on_external_tx &&	self.sealing.lock().reseal_allowed() {
-			self.prepare_and_update_sealing(chain);
+		if !results.is_empty() {
+			self.engine.on_transactions_imported();
+			if self.options.reseal_on_external_tx && self.sealing.lock().reseal_allowed() {
+				self.prepare_and_update_sealing(chain);
+			}
 		}
 
 		results
@@ -1103,8 +1106,11 @@ impl miner::MinerService for Miner {
 		// | NOTE Code below requires sealing locks.                                |
 		// | Make sure to release the locks before calling that method.             |
 		// --------------------------------------------------------------------------
-		if imported.is_ok() && self.options.reseal_on_own_tx && self.sealing.lock().reseal_allowed() {
-			self.prepare_and_update_sealing(chain);
+		if imported.is_ok() {
+			self.engine.on_transactions_imported();
+			if self.options.reseal_on_own_tx && self.sealing.lock().reseal_allowed() {
+				self.prepare_and_update_sealing(chain);
+			}
 		}
 
 		imported
