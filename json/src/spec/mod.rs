@@ -33,6 +33,7 @@ pub mod instant_seal;
 pub mod hardcoded_sync;
 pub mod clique;
 pub mod step_duration;
+pub mod hbbft;
 
 pub use self::account::Account;
 pub use self::builtin::{Builtin, Pricing, Linear};
@@ -51,3 +52,4 @@ pub use self::null_engine::{NullEngine, NullEngineParams};
 pub use self::instant_seal::{InstantSeal, InstantSealParams};
 pub use self::hardcoded_sync::HardcodedSync;
 pub use self::step_duration::StepDuration;
+pub use self::hbbft::{Hbbft, HbbftParams};

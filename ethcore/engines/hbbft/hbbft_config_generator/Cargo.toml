@@ -1,0 +1,27 @@
+[package]
+description = "parity config generator for hbbft validators"
+name = "hbbft_config_generator"
+version = "0.0.1"
+license = "GPL-3.0"
+authors = [
+    "David Forstenlechner <dforsten@gmail.com>"
+]
+
+[dependencies]
+bincode = "1.1.2"
+clap = "2"
+client-traits = { path = "../../../client-traits" }
+ethcore = { path = "../../.." }
+ethereum-types = "0.9.0"
+ethkey = { path = "../../../../accounts/ethkey" }
+ethstore = { path = "../../../../accounts/ethstore"}
+hbbft = { git = "https://github.com/poanetwork/hbbft", rev = "4857b7f9c7a0f513caca97c308d352c6a77fe5c2" }
+hbbft_testing = { git = "https://github.com/poanetwork/hbbft" }
+parity-crypto = { version = "0.6.1", features = ["publickey"] }
+rand = "0.6.5"
+rustc-hex = "2.1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.5.6"
+
+[dev-dependencies]
