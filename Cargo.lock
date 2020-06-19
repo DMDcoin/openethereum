@@ -2188,6 +2188,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "hbbft_config_generator"
+version = "0.0.1"
+dependencies = [
+ "bincode",
+ "clap",
+ "client-traits",
+ "ethcore",
+ "ethereum-types",
+ "ethkey",
+ "ethstore",
+ "hbbft 0.1.1 (git+https://github.com/poanetwork/hbbft?rev=4857b7f9c7a0f513caca97c308d352c6a77fe5c2)",
+ "hbbft_testing",
+ "parity-crypto",
+ "rand 0.6.5",
+ "rustc-hex 2.1.0",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "hbbft_testing"
 version = "0.1.0"
 source = "git+https://github.com/poanetwork/hbbft#d52be00d0e3a1e2872c8d42a076e0dc3cb86b175"

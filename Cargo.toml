@@ -129,5 +129,6 @@ members = [
 	"accounts/ethstore/cli",
 	"chainspec",
 	"ethcore/wasm/run",
-	"evmbin",
+	"ethcore/engines/hbbft/hbbft_config_generator",
+	"evmbin"
 ]

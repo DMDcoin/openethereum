@@ -32,8 +32,7 @@ use toml::{map::Map, Value};
 
 pub fn create_account() -> (Secret, Public, Address) {
 	let acc = Random
-		.generate()
-		.expect("secp context has generation capabilities; qed");
+		.generate();
 	(
 		acc.secret().clone(),
 		acc.public().clone(),
