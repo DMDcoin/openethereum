@@ -180,9 +180,6 @@ where
 	let mut secretstore = Map::new();
 	secretstore.insert("disable".into(), Value::Boolean(true));
 
-	let mut ipfs = Map::new();
-	ipfs.insert("enable".into(), Value::Boolean(false));
-
 	let signer_address = format!("{:?}", signer_address);
 
 	let mut account = Map::new();
@@ -208,27 +205,7 @@ where
 
 	if config_type != &ConfigType::Rpc {
 		mining.insert("engine_signer".into(), Value::String(signer_address));
-
-		// Write the Secret Key Share
-		let wrapper = SerdeSecret(generated_keys.1.unwrap());
-		let sks_serialized = serde_json::to_string(&wrapper).unwrap();
-		mining.insert("hbbft_secret_share".into(), Value::String(sks_serialized));
-
-		// Write the validator IP Addresses
-		let enode_map: BTreeMap<_, _> = enodes_map
-			.iter()
-			.map(|(n, enode)| (n, enode.to_string()))
-			.collect();
-		let ips_serialized = serde_json::to_string(&enode_map).unwrap();
-		mining.insert(
-			"hbbft_validator_ip_addresses".into(),
-			Value::String(ips_serialized),
-		);
 	}
-
-	// Write the Public Key Set
-	let pks_serialized = serde_json::to_string(&generated_keys.0).unwrap();
-	mining.insert("hbbft_public_key_set".into(), Value::String(pks_serialized));
 
 	mining.insert("force_sealing".into(), Value::Boolean(true));
 	mining.insert("min_gas_price".into(), Value::Integer(1000000000));
@@ -248,7 +225,6 @@ where
 	map.insert("websockets".into(), Value::Table(websockets));
 	map.insert("ipc".into(), Value::Table(ipc));
 	map.insert("secretstore".into(), Value::Table(secretstore));
-	map.insert("ipfs".into(), Value::Table(ipfs));
 	map.insert("account".into(), Value::Table(account));
 	map.insert("mining".into(), Value::Table(mining));
 	map.insert("misc".into(), Value::Table(misc));
