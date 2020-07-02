@@ -18,13 +18,10 @@ mod keygen_history_helpers;
 
 use clap::{App, Arg};
 use ethstore::{KeyFile, SafeAccount};
-use hbbft::crypto::serde_impl::SerdeSecret;
-use hbbft::sync_key_gen::SyncKeyGen;
 use keygen_history_helpers::{
-	enodes_to_pub_keys, generate_keygens, key_sync_history_data, KeyPairWrapper,
+	enodes_to_pub_keys, generate_keygens, key_sync_history_data,
 };
 use parity_crypto::publickey::{Address, Generator, KeyPair, Public, Random, Secret};
-use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::fs;
@@ -85,21 +82,16 @@ fn to_toml_array(vec: Vec<&str>) -> Value {
 	Value::Array(vec.iter().map(|s| Value::String(s.to_string())).collect())
 }
 
-fn to_toml<N>(
-	keygen: &SyncKeyGen<N, KeyPairWrapper>,
-	enodes_map: &BTreeMap<N, Enode>,
+fn to_toml(
 	i: usize,
 	config_type: &ConfigType,
 	external_ip: Option<&str>,
 	signer_address: &Address,
 ) -> Value
-where
-	N: hbbft::NodeIdT + Serialize,
 {
 	let base_port = 30300i64;
 	let base_rpc_port = 8540i64;
 	let base_ws_port = 9540i64;
-	let generated_keys = keygen.generate().unwrap();
 
 	let mut parity = Map::new();
 	match config_type {
@@ -309,8 +301,6 @@ fn main() {
 		let i = enode.idx;
 		let file_name = format!("hbbft_validator_{}.toml", i);
 		let toml_string = toml::to_string(&to_toml(
-			keygen,
-			&enodes_map,
 			i,
 			&config_type,
 			external_ip,
@@ -329,11 +319,6 @@ fn main() {
 	}
 	// Write rpc node config
 	let rpc_string = toml::to_string(&to_toml(
-		sync_keygen
-			.iter()
-			.nth(0)
-			.expect("At least one SyncKeyGen entry must exist"),
-		&enodes_map,
 		0,
 		&ConfigType::Rpc,
 		external_ip,
