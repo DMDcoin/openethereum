@@ -18,18 +18,16 @@ mod keygen_history_helpers;
 
 use clap::{App, Arg};
 use ethstore::{KeyFile, SafeAccount};
-use keygen_history_helpers::{
-	enodes_to_pub_keys, generate_keygens, key_sync_history_data,
-};
+use keygen_history_helpers::{enodes_to_pub_keys, generate_keygens, key_sync_history_data};
 use parity_crypto::publickey::{Address, Generator, KeyPair, Public, Random, Secret};
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::fs;
+use std::str::FromStr;
 use toml::{map::Map, Value};
 
 pub fn create_account() -> (Secret, Public, Address) {
-	let acc = Random
-		.generate();
+	let acc = Random.generate();
 	(
 		acc.secret().clone(),
 		acc.public().clone(),
@@ -54,7 +52,11 @@ impl ToString for Enode {
 	}
 }
 
-fn generate_enodes(num_nodes: usize, external_ip: Option<&str>) -> BTreeMap<Public, Enode> {
+fn generate_enodes(
+	num_nodes: usize,
+	private_keys: Vec<Secret>,
+	external_ip: Option<&str>,
+) -> BTreeMap<Public, Enode> {
 	let mut map = BTreeMap::new();
 	for i in 0..num_nodes {
 		// Note: node 0 is a regular full node (not a validator) in the testnet setup, so we start at index 1.
@@ -63,7 +65,18 @@ fn generate_enodes(num_nodes: usize, external_ip: Option<&str>) -> BTreeMap<Publ
 			Some(ip) => ip,
 			None => "127.0.0.1",
 		};
-		let (secret, public, address) = create_account();
+		let (secret, public, address) = if private_keys.len() > i {
+			let acc = KeyPair::from_secret(private_keys[i].clone())
+				.expect("Supplied secret must be valid!");
+			(
+				acc.secret().clone(),
+				acc.public().clone(),
+				acc.address().clone(),
+			)
+		} else {
+			create_account()
+		};
+		println!("Debug, Secret: {:?}", secret);
 		map.insert(
 			public,
 			Enode {
@@ -87,8 +100,7 @@ fn to_toml(
 	config_type: &ConfigType,
 	external_ip: Option<&str>,
 	signer_address: &Address,
-) -> Value
-{
+) -> Value {
 	let base_port = 30300i64;
 	let base_rpc_port = 8540i64;
 	let base_ws_port = 9540i64;
@@ -266,9 +278,17 @@ fn main() {
 				.index(2),
 		)
 		.arg(
-			Arg::from_usage("<extip> 'Optional external ip to configure'")
+			Arg::with_name("private_keys")
+				.long("private_keys")
 				.required(false)
-				.index(3),
+				.takes_value(true)
+				.multiple(true),
+		)
+		.arg(
+			Arg::with_name("extip")
+				.long("extip")
+				.required(false)
+				.takes_value(true),
 		)
 		.get_matches();
 
@@ -284,8 +304,20 @@ fn main() {
 		value_t!(matches.value_of("configtype"), ConfigType).unwrap_or(ConfigType::PosdaoSetup);
 
 	let external_ip = matches.value_of("extip");
+	let private_keys = matches
+		.values_of("private_keys")
+		.map_or(Vec::new(), |values| {
+			values
+				.map(|v| Secret::from_str(v).expect("Secret key format must be correct!"))
+				.collect()
+		});
 
-	let enodes_map = generate_enodes(num_nodes, external_ip);
+	// If private keys are specified we expect as many as there are nodes.
+	if private_keys.len() != 0 {
+		assert!(private_keys.len() == num_nodes);
+	};
+
+	let enodes_map = generate_enodes(num_nodes, private_keys, external_ip);
 	let mut rng = rand::thread_rng();
 
 	let pub_keys = enodes_to_pub_keys(&enodes_map);
@@ -300,13 +332,8 @@ fn main() {
 			.expect("enode should be written to the reserved peers string");
 		let i = enode.idx;
 		let file_name = format!("hbbft_validator_{}.toml", i);
-		let toml_string = toml::to_string(&to_toml(
-			i,
-			&config_type,
-			external_ip,
-			&enode.address,
-		))
-		.expect("TOML string generation should succeed");
+		let toml_string = toml::to_string(&to_toml(i, &config_type, external_ip, &enode.address))
+			.expect("TOML string generation should succeed");
 		fs::write(file_name, toml_string).expect("Unable to write config file");
 
 		let file_name = format!("hbbft_validator_key_{}", i);
