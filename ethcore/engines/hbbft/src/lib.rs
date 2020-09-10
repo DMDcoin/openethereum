@@ -103,8 +103,9 @@ mod tests {
 	}
 
 	fn generate_for_spec() -> HbbftTestData {
+		// Hard-coded secret, must match validator in contract!
 		let secret =
-			Secret::from_str("49c437676c600660905204e5f3710a6db5d3f46e3da9ba5168b9d34b0b787317")
+			Secret::from_str("2205f950a6ad1778cb6f143d185571e5f85689d10473564e259d3ed9db463aae")
 				.unwrap();
 		let keypair = KeyPair::from_secret(secret).expect("KeyPair generation must succeed");
 		hbbft_client_setup_from_contracts(keypair)
