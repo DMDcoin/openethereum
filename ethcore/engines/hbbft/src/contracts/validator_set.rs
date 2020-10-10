@@ -1,4 +1,3 @@
-use crate::contracts::staking::get_pool_pubkey;
 use client_traits::EngineClient;
 use common_types::ids::BlockId;
 use ethereum_types::Address;
@@ -20,18 +19,6 @@ macro_rules! call_const_validator {
 	};
 }
 
-pub fn staking_by_mining_address(
-	client: &dyn EngineClient,
-	mining_address: Address,
-) -> Result<Address, CallError> {
-	let c = BoundContract::bind(client, BlockId::Latest, *VALIDATOR_SET_ADDRESS);
-	Ok(call_const_validator!(
-		c,
-		staking_by_mining_address,
-		mining_address
-	)?)
-}
-
 pub fn get_validator_pubkeys(
 	client: &dyn EngineClient,
 ) -> Result<BTreeMap<Address, Public>, CallError> {
@@ -39,8 +26,13 @@ pub fn get_validator_pubkeys(
 	let validators = call_const_validator!(c, get_validators)?;
 	let mut validator_map = BTreeMap::new();
 	for v in validators {
-		let pool_address = staking_by_mining_address(client, v).unwrap();
-		let pubkey = get_pool_pubkey(client, pool_address)?;
+		let pubkey = call_const_validator!(c, get_public_key, v)?;
+
+		if pubkey.len() != 64 {
+			return Err(CallError::ReturnValueInvalid);
+		}
+		let pubkey = Public::from_slice(&pubkey);
+
 		println!("Validator {:?} with public key {}", v, pubkey);
 		validator_map.insert(v, pubkey);
 	}

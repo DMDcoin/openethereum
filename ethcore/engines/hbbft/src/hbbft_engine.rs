@@ -676,6 +676,7 @@ mod tests {
 	use hbbft::NetworkInfo;
 	use rand;
 	use std::sync::Arc;
+	use parity_crypto::publickey::{Random, Generator};
 
 	#[test]
 	fn test_single_contribution() {
@@ -693,7 +694,8 @@ mod tests {
 		let mut honey_badger = builder.build();
 
 		let mut pending: Vec<SignedTransaction> = Vec::new();
-		pending.push(create_transaction());
+		let keypair = Random.generate();
+		pending.push(create_transaction(&keypair));
 		let input_contribution = Contribution::new(&pending);
 
 		let step = honey_badger

@@ -20,7 +20,7 @@ use_contract!(key_history_contract, "res/key_history_contract.json");
 
 lazy_static! {
 	static ref KEYGEN_HISTORY_ADDRESS: Address =
-		Address::from_str("8000000000000000000000000000000000000000").unwrap();
+		Address::from_str("7000000000000000000000000000000000000001").unwrap();
 }
 
 macro_rules! call_const_key_history {
