@@ -53,11 +53,13 @@ mod tests {
 	use crate::utils::test_helpers::create_transaction;
 	use common_types::transaction::SignedTransaction;
 	use rlp::{Decodable, Rlp};
+	use parity_crypto::publickey::{Random, Generator};
 
 	#[test]
 	fn test_contribution_serialization() {
 		let mut pending: Vec<SignedTransaction> = Vec::new();
-		pending.push(create_transaction());
+		let keypair = Random.generate();
+		pending.push(create_transaction(&keypair));
 		let contribution = super::Contribution::new(&pending);
 
 		let deser_txns: Vec<_> = contribution

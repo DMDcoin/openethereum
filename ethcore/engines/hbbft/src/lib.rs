@@ -105,7 +105,7 @@ mod tests {
 	fn generate_for_spec() -> HbbftTestData {
 		// Hard-coded secret, must match validator in contract!
 		let secret =
-			Secret::from_str("2205f950a6ad1778cb6f143d185571e5f85689d10473564e259d3ed9db463aae")
+			Secret::from_str("c7dea031415adbba4510ec3bf3b51f7a4ac7c6e6078bf5747bd128a925edb394")
 				.unwrap();
 		let keypair = KeyPair::from_secret(secret).expect("KeyPair generation must succeed");
 		hbbft_client_setup_from_contracts(keypair)
@@ -124,7 +124,7 @@ mod tests {
 		assert_eq!(test_data.client.chain().best_block_number(), 0);
 
 		// Inject a transaction, with instant sealing a block will be created right away.
-		inject_transaction(&test_data.client, &test_data.miner);
+		inject_transaction(&test_data.client, &test_data.miner, &test_data.keypair);
 
 		// Expect a new block to be created.
 		assert_eq!(test_data.client.chain().best_block_number(), 1);
@@ -192,7 +192,7 @@ mod tests {
 			// Verify that we actually start at block 0.
 			assert_eq!(n.client.chain().best_block_number(), 0);
 			// Inject transactions to kick off block creation.
-			inject_transaction(&n.client, &n.miner);
+			inject_transaction(&n.client, &n.miner, &n.keypair);
 		}
 
 		// Rudimentary network simulation.
@@ -238,7 +238,7 @@ mod tests {
 		// Get the first node and send a transaction to it.
 		let first_node = &nodes.iter().nth(0).unwrap().1;
 		let second_node = &nodes.iter().nth(1).unwrap().1;
-		inject_transaction(&first_node.client, &first_node.miner);
+		inject_transaction(&first_node.client, &first_node.miner, &first_node.keypair);
 
 		// Crank the network until no node has any input
 		crank_network(&nodes);
@@ -247,7 +247,7 @@ mod tests {
 		assert_eq!(first_node.client.chain().best_block_number(), 0);
 
 		// Get the second node and send a transaction to it.
-		inject_transaction(&second_node.client, &second_node.miner);
+		inject_transaction(&second_node.client, &second_node.miner, &second_node.keypair);
 
 		// Crank the network until no node has any input
 		crank_network(&nodes);

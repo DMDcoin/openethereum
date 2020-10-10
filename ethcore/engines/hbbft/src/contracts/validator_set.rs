@@ -10,7 +10,7 @@ use_contract!(validator_set_hbbft, "res/validator_set_hbbft.json");
 
 lazy_static! {
 	static ref VALIDATOR_SET_ADDRESS: Address =
-		Address::from_str("1000000000000000000000000000000000000000").unwrap();
+		Address::from_str("1000000000000000000000000000000000000001").unwrap();
 }
 
 macro_rules! call_const_validator {
