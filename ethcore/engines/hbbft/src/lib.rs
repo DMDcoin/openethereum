@@ -66,21 +66,30 @@ impl fmt::Display for NodeId {
 #[cfg(test)]
 mod tests {
 	use crate::utils::test_helpers::{
-		hbbft_client_setup, hbbft_client_setup_from_contracts, inject_transaction, HbbftTestData,
+		create_hbbft_client, hbbft_client_setup, inject_transaction, HbbftTestClient,
 	};
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
-	use ethereum_types::H256;
+	use ethereum_types::{H256, U256};
 	use hash::keccak;
 	use hbbft::NetworkInfo;
 	use hbbft_testing::proptest::{gen_seed, TestRng, TestRngSeed};
+	use parity_crypto::publickey::{Generator, Random};
 	use parity_crypto::publickey::{KeyPair, Public, Secret};
 	use proptest::{prelude::ProptestConfig, proptest};
 	use rand::{Rng, SeedableRng};
 	use std::collections::BTreeMap;
 	use std::str::FromStr;
 
-	fn generate_nodes<R: Rng>(size: usize, rng: &mut R) -> BTreeMap<Public, HbbftTestData> {
+	lazy_static! {
+		static ref MASTER_OF_CEREMONIES_KEYPAIR: KeyPair = KeyPair::from_secret(
+			Secret::from_str("c7dea031415adbba4510ec3bf3b51f7a4ac7c6e6078bf5747bd128a925edb394")
+				.expect("Secret from hex string must succeed")
+		)
+		.expect("KeyPair generation from secret must succeed");
+	}
+
+	fn generate_nodes<R: Rng>(size: usize, rng: &mut R) -> BTreeMap<Public, HbbftTestClient> {
 		let keypairs: Vec<KeyPair> = (1..=size)
 			.map(|i| {
 				let secret = Secret::from(<[u8; 32]>::from(keccak(i.to_string())));
@@ -102,23 +111,14 @@ mod tests {
 			.collect()
 	}
 
-	fn generate_for_spec() -> HbbftTestData {
-		// Hard-coded secret, must match validator in contract!
-		let secret =
-			Secret::from_str("c7dea031415adbba4510ec3bf3b51f7a4ac7c6e6078bf5747bd128a925edb394")
-				.unwrap();
-		let keypair = KeyPair::from_secret(secret).expect("KeyPair generation must succeed");
-		hbbft_client_setup_from_contracts(keypair)
-	}
-
 	// Returns `true` if the node has any unsent messages left.
-	fn has_messages(node: &HbbftTestData) -> bool {
+	fn has_messages(node: &HbbftTestClient) -> bool {
 		!node.notify.targeted_messages.read().is_empty()
 	}
 
 	#[test]
 	fn test_miner_transaction_injection() {
-		let test_data = generate_for_spec();
+		let test_data = create_hbbft_client(MASTER_OF_CEREMONIES_KEYPAIR.clone());
 
 		// Verify that we actually start at block 0.
 		assert_eq!(test_data.client.chain().best_block_number(), 0);
@@ -137,7 +137,34 @@ mod tests {
 		assert_eq!(block.transactions_count(), 1);
 	}
 
-	fn crank_network_single_step(nodes: &BTreeMap<Public, HbbftTestData>) {
+	#[test]
+	fn test_staking_account_creation() {
+		// Create Master of Ceremonies
+		let moc = create_hbbft_client(MASTER_OF_CEREMONIES_KEYPAIR.clone());
+
+		// Verify the master of ceremony is funded.
+		assert!(moc.balance(&moc.address()) > U256::from(10000000));
+
+		// Create a potential validator.
+		let staking_validator = create_hbbft_client(Random.generate());
+
+		// Verify the pending validator is unfunded.
+		assert_eq!(moc.balance(&staking_validator.address()), U256::from(0));
+
+		// Verify that we actually start at block 0.
+		assert_eq!(moc.client.chain().best_block_number(), 0);
+
+		// Inject a transaction, with instant sealing a block will be created right away.
+		moc.transfer_to(&staking_validator.address(), &U256::from(10000));
+
+		// Expect a new block to be created.
+		assert_eq!(moc.client.chain().best_block_number(), 1);
+
+		// Verify the pending validator is now funded.
+		assert_eq!(moc.balance(&staking_validator.address()), U256::from(10000));
+	}
+
+	fn crank_network_single_step(nodes: &BTreeMap<Public, HbbftTestClient>) {
 		for (from, n) in nodes {
 			let mut targeted_messages = n.notify.targeted_messages.write();
 			for m in targeted_messages.drain(..) {
@@ -152,7 +179,7 @@ mod tests {
 		}
 	}
 
-	fn crank_network(nodes: &BTreeMap<Public, HbbftTestData>) {
+	fn crank_network(nodes: &BTreeMap<Public, HbbftTestClient>) {
 		while nodes.iter().any(|(_, test_data)| has_messages(test_data)) {
 			crank_network_single_step(nodes);
 		}

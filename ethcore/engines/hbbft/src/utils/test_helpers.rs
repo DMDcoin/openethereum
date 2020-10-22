@@ -1,3 +1,5 @@
+use client_traits::{Balance, StateOrBlock};
+use common_types::ids::BlockId;
 use common_types::transaction::{Action, SignedTransaction, Transaction};
 use engine::signer::from_keypair;
 use ethcore::client::Client;
@@ -22,14 +24,33 @@ pub fn hbbft_client() -> std::sync::Arc<ethcore::client::Client> {
 	generate_dummy_client_with_spec(hbbft_spec)
 }
 
-pub struct HbbftTestData {
+pub struct HbbftTestClient {
 	pub client: Arc<Client>,
 	pub notify: Arc<TestNotify>,
 	pub miner: Arc<Miner>,
 	pub keypair: KeyPair,
 }
 
-pub fn hbbft_client_setup_from_contracts(keypair: KeyPair) -> HbbftTestData {
+impl HbbftTestClient {
+	pub fn transfer_to(&self, receiver: &Address, amount: &U256) {
+		let transaction = create_transfer(&self.keypair, receiver, amount);
+		self.miner
+			.import_own_transaction(self.client.as_ref(), transaction.into())
+			.unwrap();
+	}
+
+	pub fn balance(&self, address: &Address) -> U256 {
+		self.client
+			.balance(address, StateOrBlock::Block(BlockId::Latest))
+			.expect("Querying address balance should always succeed.")
+	}
+
+	pub fn address(&self) -> Address {
+		self.keypair.address()
+	}
+}
+
+pub fn create_hbbft_client(keypair: KeyPair) -> HbbftTestClient {
 	let client = hbbft_client();
 	let miner = client.miner();
 	let engine = client.engine();
@@ -39,7 +60,7 @@ pub fn hbbft_client_setup_from_contracts(keypair: KeyPair) -> HbbftTestData {
 	let notify = Arc::new(TestNotify::default());
 	client.add_notify(notify.clone());
 
-	HbbftTestData {
+	HbbftTestClient {
 		client,
 		notify,
 		miner,
@@ -47,7 +68,7 @@ pub fn hbbft_client_setup_from_contracts(keypair: KeyPair) -> HbbftTestData {
 	}
 }
 
-pub fn hbbft_client_setup(keypair: KeyPair, net_info: NetworkInfo<Public>) -> HbbftTestData {
+pub fn hbbft_client_setup(keypair: KeyPair, net_info: NetworkInfo<Public>) -> HbbftTestClient {
 	assert_eq!(keypair.public(), net_info.our_id());
 	let client = hbbft_client();
 
@@ -65,7 +86,7 @@ pub fn hbbft_client_setup(keypair: KeyPair, net_info: NetworkInfo<Public>) -> Hb
 	let notify = Arc::new(TestNotify::default());
 	client.add_notify(notify.clone());
 
-	HbbftTestData {
+	HbbftTestClient {
 		client,
 		notify,
 		miner,
@@ -77,6 +98,18 @@ pub fn create_transaction(keypair: &KeyPair) -> SignedTransaction {
 	Transaction {
 		action: Action::Call(Address::from_low_u64_be(5798439875)),
 		value: U256::zero(),
+		data: vec![],
+		gas: U256::from(100_000),
+		gas_price: "10000000000".into(),
+		nonce: 1048576.into(),
+	}
+	.sign(keypair.secret(), None)
+}
+
+pub fn create_transfer(keypair: &KeyPair, receiver: &Address, amount: &U256) -> SignedTransaction {
+	Transaction {
+		action: Action::Call(receiver.clone()),
+		value: amount.clone(),
 		data: vec![],
 		gas: U256::from(100_000),
 		gas_price: "10000000000".into(),
