@@ -52,8 +52,8 @@ impl Contribution {
 mod tests {
 	use crate::utils::test_helpers::create_transaction;
 	use common_types::transaction::SignedTransaction;
+	use parity_crypto::publickey::{Generator, Random};
 	use rlp::{Decodable, Rlp};
-	use parity_crypto::publickey::{Random, Generator};
 
 	#[test]
 	fn test_contribution_serialization() {

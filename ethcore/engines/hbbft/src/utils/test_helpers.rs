@@ -4,10 +4,9 @@ use ethcore::client::Client;
 use ethcore::miner::{Miner, MinerService};
 use ethcore::test_helpers::generate_dummy_client_with_spec;
 use ethcore::test_helpers::TestNotify;
-use ethereum_types::{U256, Address};
+use ethereum_types::{Address, U256};
 use hbbft::NetworkInfo;
 use parity_crypto::publickey::{KeyPair, Public};
-use rustc_hex::FromHex;
 use spec::Spec;
 use std::sync::Arc;
 
@@ -44,14 +43,11 @@ pub fn hbbft_client_setup_from_contracts(keypair: KeyPair) -> HbbftTestData {
 		client,
 		notify,
 		miner,
-		keypair
+		keypair,
 	}
 }
 
-pub fn hbbft_client_setup(
-	keypair: KeyPair,
-	net_info: NetworkInfo<Public>,
-) -> HbbftTestData {
+pub fn hbbft_client_setup(keypair: KeyPair, net_info: NetworkInfo<Public>) -> HbbftTestData {
 	assert_eq!(keypair.public(), net_info.our_id());
 	let client = hbbft_client();
 
@@ -73,7 +69,7 @@ pub fn hbbft_client_setup(
 		client,
 		notify,
 		miner,
-		keypair
+		keypair,
 	}
 }
 

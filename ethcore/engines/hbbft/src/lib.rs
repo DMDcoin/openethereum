@@ -247,7 +247,11 @@ mod tests {
 		assert_eq!(first_node.client.chain().best_block_number(), 0);
 
 		// Get the second node and send a transaction to it.
-		inject_transaction(&second_node.client, &second_node.miner, &second_node.keypair);
+		inject_transaction(
+			&second_node.client,
+			&second_node.miner,
+			&second_node.keypair,
+		);
 
 		// Crank the network until no node has any input
 		crank_network(&nodes);

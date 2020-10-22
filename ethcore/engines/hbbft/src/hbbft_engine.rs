@@ -265,7 +265,7 @@ impl HoneyBadgerBFT {
 			Some(t) => t,
 			None => {
 				error!(target: "consensus", "Error calculating the block timestamp");
-				return
+				return;
 			}
 		};
 
@@ -674,9 +674,9 @@ mod tests {
 	use common_types::transaction::SignedTransaction;
 	use hbbft::honey_badger::{HoneyBadger, HoneyBadgerBuilder};
 	use hbbft::NetworkInfo;
+	use parity_crypto::publickey::{Generator, Random};
 	use rand;
 	use std::sync::Arc;
-	use parity_crypto::publickey::{Random, Generator};
 
 	#[test]
 	fn test_single_contribution() {
