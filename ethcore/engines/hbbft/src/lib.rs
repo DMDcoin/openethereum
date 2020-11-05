@@ -70,6 +70,7 @@ mod tests {
 	};
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
+	use contracts::staking::tests::{add_pool, min_staking};
 	use ethereum_types::{H256, U256};
 	use hash::keccak;
 	use hbbft::NetworkInfo;
@@ -140,7 +141,7 @@ mod tests {
 	#[test]
 	fn test_staking_account_creation() {
 		// Create Master of Ceremonies
-		let moc = create_hbbft_client(MASTER_OF_CEREMONIES_KEYPAIR.clone());
+		let mut moc = create_hbbft_client(MASTER_OF_CEREMONIES_KEYPAIR.clone());
 
 		// Verify the master of ceremony is funded.
 		assert!(moc.balance(&moc.address()) > U256::from(10000000));
@@ -154,14 +155,40 @@ mod tests {
 		// Verify that we actually start at block 0.
 		assert_eq!(moc.client.chain().best_block_number(), 0);
 
+		let min_staking_amount =
+			min_staking(moc.client.as_ref()).expect("Query for minimum staking must succeed.");
+
+		let amount_to_transfer = U256::from(1000000000) + min_staking_amount;
+
 		// Inject a transaction, with instant sealing a block will be created right away.
-		moc.transfer_to(&staking_validator.address(), &U256::from(10000));
+		moc.transfer_to(&staking_validator.address(), &amount_to_transfer);
 
 		// Expect a new block to be created.
 		assert_eq!(moc.client.chain().best_block_number(), 1);
 
 		// Verify the pending validator is now funded.
-		assert_eq!(moc.balance(&staking_validator.address()), U256::from(10000));
+		assert_eq!(
+			moc.balance(&staking_validator.address()),
+			amount_to_transfer
+		);
+
+		// Create a staking
+		let _abi_bytes = add_pool(
+			staking_validator.address(),
+			staking_validator.keypair.public().clone(),
+		);
+
+		// Create staking address
+		let staker_1: KeyPair = Random.generate();
+
+		// Transfer stake to staker_1
+		moc.transfer_to(&staker_1.address(), &amount_to_transfer);
+
+		// Expect a new block to be created.
+		assert_eq!(moc.client.chain().best_block_number(), 2);
+
+		// Verify the staker is now funded.
+		assert_eq!(moc.balance(&staker_1.address()), amount_to_transfer);
 	}
 
 	fn crank_network_single_step(nodes: &BTreeMap<Public, HbbftTestClient>) {

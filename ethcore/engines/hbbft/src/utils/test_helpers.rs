@@ -29,11 +29,13 @@ pub struct HbbftTestClient {
 	pub notify: Arc<TestNotify>,
 	pub miner: Arc<Miner>,
 	pub keypair: KeyPair,
+	pub nonce: U256,
 }
 
 impl HbbftTestClient {
-	pub fn transfer_to(&self, receiver: &Address, amount: &U256) {
-		let transaction = create_transfer(&self.keypair, receiver, amount);
+	pub fn transfer_to(&mut self, receiver: &Address, amount: &U256) {
+		let transaction = create_transfer(&self.keypair, receiver, amount, &self.nonce);
+		self.nonce += U256::from(1);
 		self.miner
 			.import_own_transaction(self.client.as_ref(), transaction.into())
 			.unwrap();
@@ -65,6 +67,7 @@ pub fn create_hbbft_client(keypair: KeyPair) -> HbbftTestClient {
 		notify,
 		miner,
 		keypair,
+		nonce: U256::from(1048576),
 	}
 }
 
@@ -91,6 +94,7 @@ pub fn hbbft_client_setup(keypair: KeyPair, net_info: NetworkInfo<Public>) -> Hb
 		notify,
 		miner,
 		keypair,
+		nonce: U256::from(1048576),
 	}
 }
 
@@ -106,14 +110,19 @@ pub fn create_transaction(keypair: &KeyPair) -> SignedTransaction {
 	.sign(keypair.secret(), None)
 }
 
-pub fn create_transfer(keypair: &KeyPair, receiver: &Address, amount: &U256) -> SignedTransaction {
+pub fn create_transfer(
+	keypair: &KeyPair,
+	receiver: &Address,
+	amount: &U256,
+	nonce: &U256,
+) -> SignedTransaction {
 	Transaction {
 		action: Action::Call(receiver.clone()),
 		value: amount.clone(),
 		data: vec![],
 		gas: U256::from(100_000),
 		gas_price: "10000000000".into(),
-		nonce: 1048576.into(),
+		nonce: *nonce,
 	}
 	.sign(keypair.secret(), None)
 }
