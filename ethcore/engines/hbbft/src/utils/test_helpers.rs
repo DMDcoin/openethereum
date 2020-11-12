@@ -1,4 +1,4 @@
-use client_traits::{Balance, StateOrBlock};
+use client_traits::{Balance, Nonce, StateOrBlock};
 use common_types::ids::BlockId;
 use common_types::transaction::{Action, SignedTransaction, Transaction};
 use engine::signer::from_keypair;
@@ -38,6 +38,27 @@ impl HbbftTestClient {
 		self.nonce += U256::from(1);
 		self.miner
 			.import_own_transaction(self.client.as_ref(), transaction.into())
+			.unwrap();
+	}
+
+	pub fn call(&mut self, receiver: &Address, abi_call: ethabi::Bytes, amount: &U256) {
+		self.call_as(&self.keypair.clone(), receiver, abi_call, amount);
+	}
+
+	pub fn call_as(
+		&mut self,
+		caller: &KeyPair,
+		receiver: &Address,
+		abi_call: ethabi::Bytes,
+		amount: &U256,
+	) {
+		let cur_nonce = self
+			.client
+			.nonce(&caller.address(), BlockId::Number(self.client.chain().best_block_number()))
+			.expect("Nonce for the current best block must always succeed");
+		let transaction = create_call(caller, receiver, abi_call, amount, &cur_nonce);
+		self.miner
+			.import_claimed_local_transaction(self.client.as_ref(), transaction.into(), false)
 			.unwrap();
 	}
 
@@ -120,6 +141,24 @@ pub fn create_transfer(
 		action: Action::Call(receiver.clone()),
 		value: amount.clone(),
 		data: vec![],
+		gas: U256::from(100_000),
+		gas_price: "10000000000".into(),
+		nonce: *nonce,
+	}
+	.sign(keypair.secret(), None)
+}
+
+pub fn create_call(
+	keypair: &KeyPair,
+	receiver: &Address,
+	abi_call: ethabi::Bytes,
+	amount: &U256,
+	nonce: &U256,
+) -> SignedTransaction {
+	Transaction {
+		action: Action::Call(receiver.clone()),
+		value: amount.clone(),
+		data: abi_call,
 		gas: U256::from(100_000),
 		gas_price: "10000000000".into(),
 		nonce: *nonce,
