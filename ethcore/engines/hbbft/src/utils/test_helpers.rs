@@ -54,7 +54,10 @@ impl HbbftTestClient {
 	) {
 		let cur_nonce = self
 			.client
-			.nonce(&caller.address(), BlockId::Number(self.client.chain().best_block_number()))
+			.nonce(
+				&caller.address(),
+				BlockId::Number(self.client.chain().best_block_number()),
+			)
 			.expect("Nonce for the current best block must always succeed");
 		let transaction = create_call(caller, receiver, abi_call, amount, &cur_nonce);
 		self.miner
@@ -159,7 +162,7 @@ pub fn create_call(
 		action: Action::Call(receiver.clone()),
 		value: amount.clone(),
 		data: abi_call,
-		gas: U256::from(100_000),
+		gas: U256::from(900_000),
 		gas_price: "10000000000".into(),
 		nonce: *nonce,
 	}

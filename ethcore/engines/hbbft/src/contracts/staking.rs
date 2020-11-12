@@ -26,7 +26,10 @@ pub mod tests {
 		call_const_staking!(c, candidate_min_stake)
 	}
 
-	pub fn is_pool_active(client: &dyn EngineClient, staking_address: Address) -> Result<bool, CallError> {
+	pub fn is_pool_active(
+		client: &dyn EngineClient,
+		staking_address: Address,
+	) -> Result<bool, CallError> {
 		let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
 		call_const_staking!(c, is_pool_active, staking_address)
 	}
@@ -63,7 +66,12 @@ pub mod tests {
 		let abi_bytes = add_pool(miner.address(), miner.keypair.public().clone());
 
 		// Register the staker
-		moc.call_as(&staker, &STAKING_CONTRACT_ADDRESS, abi_bytes, &min_staking_amount);
+		moc.call_as(
+			&staker,
+			&STAKING_CONTRACT_ADDRESS,
+			abi_bytes,
+			&min_staking_amount,
+		);
 
 		staker
 	}

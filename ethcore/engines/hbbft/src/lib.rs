@@ -71,7 +71,8 @@ mod tests {
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
 	use contracts::staking::tests::{create_staker, is_pool_active};
-	use ethereum_types::{H256, U256};
+	use contracts::validator_set::mining_by_staking_address;
+	use ethereum_types::{Address, H256, U256};
 	use hash::keccak;
 	use hbbft::NetworkInfo;
 	use hbbft_testing::proptest::{gen_seed, TestRng, TestRngSeed};
@@ -83,7 +84,7 @@ mod tests {
 
 	lazy_static! {
 		static ref MASTER_OF_CEREMONIES_KEYPAIR: KeyPair = KeyPair::from_secret(
-			Secret::from_str("c7dea031415adbba4510ec3bf3b51f7a4ac7c6e6078bf5747bd128a925edb394")
+			Secret::from_str("79369bfded55290dc275e35326779056922d4baf22821a7dbecfc5e19199de56")
 				.expect("Secret from hex string must succeed")
 		)
 		.expect("KeyPair generation from secret must succeed");
@@ -154,7 +155,7 @@ mod tests {
 		// Verify that we actually start at block 0.
 		assert_eq!(moc.client.chain().best_block_number(), 0);
 
-		let transaction_funds = U256::from(1000000000000000000u64);
+		let transaction_funds = U256::from(9000000000000000000u64);
 
 		// Inject a transaction, with instant sealing a block will be created right away.
 		moc.transfer_to(&miner_1.address(), &transaction_funds);
@@ -166,7 +167,7 @@ mod tests {
 		assert_eq!(moc.balance(&miner_1.address()), transaction_funds);
 
 		// Create staking address
-		let staker_1: KeyPair = create_staker(&mut moc, &miner_1, transaction_funds);
+		let staker_1 = create_staker(&mut moc, &miner_1, transaction_funds);
 
 		// Expect two new blocks to be created, one for the transfer of staking funds,
 		// one for registering the staker as pool.
@@ -179,12 +180,18 @@ mod tests {
 			.expect("Block must exist");
 		assert_eq!(block.transactions_count(), 1);
 
+		assert_ne!(
+			mining_by_staking_address(moc.client.as_ref(), &staker_1.address())
+				.expect("Constant call must succeed."),
+			Address::zero()
+		);
+
 		// Check if the staking pool is active.
-		// assert_eq!(
-		// 	is_pool_active(moc.client.as_ref(), staker_1.address())
-		// 		.expect("Pool active query must succeed."),
-		// 	true
-		// );
+		assert_eq!(
+			is_pool_active(moc.client.as_ref(), staker_1.address())
+				.expect("Pool active query must succeed."),
+			true
+		);
 	}
 
 	fn crank_network_single_step(nodes: &BTreeMap<Public, HbbftTestClient>) {
