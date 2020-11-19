@@ -17,6 +17,7 @@
 //! Hbbft parameter deserialization.
 
 use serde::Deserialize;
+use ethereum_types::Address;
 
 /// Hbbft parameters.
 #[derive(Debug, PartialEq, Deserialize)]
@@ -29,6 +30,8 @@ pub struct HbbftParams {
     pub transaction_queue_size_trigger: usize,
     /// Should be true when running unit tests to avoid starting timers.
     pub is_unit_test: Option<bool>,
+    /// Block reward contract address.
+    pub block_reward_contract_address: Option<Address>,
 }
 
 /// Hbbft engine config.
@@ -49,7 +52,8 @@ mod tests {
 			"params": {
 				"minimumBlockTime": 0,
 				"transactionQueueSizeTrigger": 1,
-				"isUnitTest": true
+				"isUnitTest": true,
+				"blockRewardContractAddress": "0x2000000000000000000000000000000000000002",
 			}
 		}"#;
 
@@ -57,5 +61,6 @@ mod tests {
         assert_eq!(deserialized.params.minimum_block_time, 0);
         assert_eq!(deserialized.params.transaction_queue_size_trigger, 1);
         assert_eq!(deserialized.params.is_unit_test, Some(true));
+        assert_eq!(deserialized.params.block_reward_contract_address, Address::from("0x2000000000000000000000000000000000000002"));
     }
 }
