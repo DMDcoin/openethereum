@@ -5,7 +5,8 @@
 			"params": {
 				"minimumBlockTime": 0,
 				"transactionQueueSizeTrigger": 1,
-				"isUnitTest": true
+				"isUnitTest": true,
+				"blockRewardContractAddress": "0x2000000000000000000000000000000000000001"
 			}
 		}
 	},

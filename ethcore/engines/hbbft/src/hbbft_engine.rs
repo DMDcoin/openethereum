@@ -5,6 +5,7 @@ use std::ops::BitXor;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use crate::block_reward_hbbft::BlockRewardContract;
 use client_traits::{EngineClient, ForceUpdateSealing};
 use common_types::{
 	engines::{params::CommonParams, Seal, SealingState},
@@ -664,6 +665,15 @@ impl Engine for HoneyBadgerBFT {
 
 	fn use_block_author(&self) -> bool {
 		false
+	}
+
+	fn on_close_block(&self, block: &mut ExecutedBlock, _parent: &Header) -> Result<(), Error> {
+		if let Some(address) = self.params.block_reward_contract_address {
+			let mut call = engine::default_system_or_code_call(&self.machine, block);
+			let contract = BlockRewardContract::new_from_address(address);
+			let _total_reward = contract.reward(&mut call, false)?;
+		}
+		Ok(())
 	}
 }
 

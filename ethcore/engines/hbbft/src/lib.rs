@@ -38,6 +38,7 @@ extern crate spec;
 #[cfg(test)]
 extern crate toml;
 
+mod block_reward_hbbft;
 mod contracts;
 mod contribution;
 mod hbbft_engine;
