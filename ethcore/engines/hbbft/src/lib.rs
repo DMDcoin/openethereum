@@ -71,7 +71,7 @@ mod tests {
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
 	use contracts::staking::tests::{
-		create_staker, is_pool_active, start_time_of_next_phase_transition,
+		create_staker, is_pool_active, staking_epoch, start_time_of_next_phase_transition,
 	};
 	use contracts::validator_set::{
 		is_pending_validator, mining_by_staking_address, staking_by_mining_address,
@@ -209,6 +209,10 @@ mod tests {
 		// Genesis block is at time 0, current unix time must be much larger.
 		assert!(genesis_transition_time.as_u64() < unix_now_secs());
 
+		// We should not be in the pending validator set at the genesis block.
+		assert!(!is_pending_validator(moc.client.as_ref(), &moc.address())
+			.expect("Constant call must succeed"));
+
 		// Trigger creation of a block.
 		// This implicitly calls the block reward contract, which should trigger a phase transition
 		// since we already verified that the genesis transition time threshold has been reached.
@@ -217,11 +221,31 @@ mod tests {
 		// Expect a new block to be created.
 		assert_eq!(moc.client.chain().best_block_number(), 1);
 
+		// Now we should be part of the pending validator set.
 		assert!(is_pending_validator(moc.client.as_ref(), &moc.address())
 			.expect("Constant call must succeed"));
 
-		// Give the validator a chance to send its parts and acks.
+		// Check if we are still in the first epoch.
+		assert_eq!(
+			staking_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
+			U256::from(0)
+		);
+
+		// First the validator realizes it is in the next validator set and sends his part.
 		moc.create_some_transaction();
+		// With the next block the validator submits an Ack for his Part.
+		moc.create_some_transaction();
+		// In the next block all Parts and Acks are available, and the hbbft engine can
+		// call the block contract with the block transition with "_isEpochEndBlock" true.
+		moc.create_some_transaction();
+
+		// @todo: Implement sending of parts/acks transactions and sending _isEpochEndBlock to the block reward contract in the hbbft engine.
+
+		// At this point we should be in the new epoch.
+		// assert_eq!(
+		// 	staking_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
+		// 	U256::from(1)
+		// );
 	}
 
 	fn crank_network_single_step(nodes: &BTreeMap<Public, HbbftTestClient>) {

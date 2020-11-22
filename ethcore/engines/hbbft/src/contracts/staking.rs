@@ -41,6 +41,11 @@ pub mod tests {
 		call_const_staking!(c, start_time_of_next_phase_transition)
 	}
 
+	pub fn staking_epoch(client: &dyn EngineClient) -> Result<U256, CallError> {
+		let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
+		call_const_staking!(c, staking_epoch)
+	}
+
 	pub fn add_pool(mining_address: Address, mining_public_key: Public) -> ethabi::Bytes {
 		let (abi_bytes, _) = staking_contract::functions::add_pool::call(
 			mining_address,
