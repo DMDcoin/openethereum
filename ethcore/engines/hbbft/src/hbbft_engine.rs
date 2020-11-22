@@ -682,6 +682,7 @@ mod tests {
 	use crate::contribution::Contribution;
 	use crate::utils::test_helpers::create_transaction;
 	use common_types::transaction::SignedTransaction;
+	use ethereum_types::U256;
 	use hbbft::honey_badger::{HoneyBadger, HoneyBadgerBuilder};
 	use hbbft::NetworkInfo;
 	use parity_crypto::publickey::{Generator, Random};
@@ -705,7 +706,7 @@ mod tests {
 
 		let mut pending: Vec<SignedTransaction> = Vec::new();
 		let keypair = Random.generate();
-		pending.push(create_transaction(&keypair));
+		pending.push(create_transaction(&keypair, &U256::from(1)));
 		let input_contribution = Contribution::new(&pending);
 
 		let step = honey_badger

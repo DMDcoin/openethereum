@@ -67,9 +67,7 @@ impl fmt::Display for NodeId {
 #[cfg(test)]
 mod tests {
 	use crate::contribution::unix_now_secs;
-	use crate::utils::test_helpers::{
-		create_hbbft_client, hbbft_client_setup, inject_transaction, HbbftTestClient,
-	};
+	use crate::utils::test_helpers::{create_hbbft_client, hbbft_client_setup, HbbftTestClient};
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
 	use contracts::staking::tests::{
@@ -125,13 +123,13 @@ mod tests {
 
 	#[test]
 	fn test_miner_transaction_injection() {
-		let test_data = create_hbbft_client(MASTER_OF_CEREMONIES_KEYPAIR.clone());
+		let mut test_data = create_hbbft_client(MASTER_OF_CEREMONIES_KEYPAIR.clone());
 
 		// Verify that we actually start at block 0.
 		assert_eq!(test_data.client.chain().best_block_number(), 0);
 
 		// Inject a transaction, with instant sealing a block will be created right away.
-		inject_transaction(&test_data.client, &test_data.miner, &test_data.keypair);
+		test_data.create_some_transaction();
 
 		// Expect a new block to be created.
 		assert_eq!(test_data.client.chain().best_block_number(), 1);
@@ -214,15 +212,16 @@ mod tests {
 		// Trigger creation of a block.
 		// This implicitly calls the block reward contract, which should trigger a phase transition
 		// since we already verified that the genesis transition time threshold has been reached.
-		inject_transaction(&moc.client, &moc.miner, &moc.keypair);
+		moc.create_some_transaction();
 
 		// Expect a new block to be created.
 		assert_eq!(moc.client.chain().best_block_number(), 1);
 
-		assert!(
-			is_pending_validator(moc.client.as_ref(), &moc.address())
-				.expect("Constant call must succeed")
-		);
+		assert!(is_pending_validator(moc.client.as_ref(), &moc.address())
+			.expect("Constant call must succeed"));
+
+		// Give the validator a chance to send its parts and acks.
+		moc.create_some_transaction();
 	}
 
 	fn crank_network_single_step(nodes: &BTreeMap<Public, HbbftTestClient>) {
@@ -274,13 +273,13 @@ mod tests {
 	}
 
 	fn test_with_size<R: Rng>(rng: &mut R, size: usize) {
-		let nodes = generate_nodes(size, rng);
+		let mut nodes = generate_nodes(size, rng);
 
-		for (_, n) in &nodes {
+		for (_, n) in &mut nodes {
 			// Verify that we actually start at block 0.
 			assert_eq!(n.client.chain().best_block_number(), 0);
 			// Inject transactions to kick off block creation.
-			inject_transaction(&n.client, &n.miner, &n.keypair);
+			n.create_some_transaction();
 		}
 
 		// Rudimentary network simulation.
@@ -321,28 +320,30 @@ mod tests {
 		// Other nodes should *not* join the epoch if they receive only
 		// one contribution, but if 2 or more are received they should!
 		let network_size: usize = 4;
-		let nodes = generate_nodes(network_size, &mut rng);
+		let mut nodes = generate_nodes(network_size, &mut rng);
 
-		// Get the first node and send a transaction to it.
-		let first_node = &nodes.iter().nth(0).unwrap().1;
-		let second_node = &nodes.iter().nth(1).unwrap().1;
-		inject_transaction(&first_node.client, &first_node.miner, &first_node.keypair);
+		// Get the first node as mutable reference and send a transaction to it.
+		let first_node: &mut HbbftTestClient = nodes.iter_mut().nth(0).unwrap().1;
+		first_node.create_some_transaction();
 
 		// Crank the network until no node has any input
 		crank_network(&nodes);
+
+		// Cannot re-use the mutable reference to an element of nodes, re-acquire as immutable.
+		let first_node = nodes.iter().nth(0).unwrap().1;
 
 		// We expect no new block being generated in this case!
 		assert_eq!(first_node.client.chain().best_block_number(), 0);
 
 		// Get the second node and send a transaction to it.
-		inject_transaction(
-			&second_node.client,
-			&second_node.miner,
-			&second_node.keypair,
-		);
+		let second_node = nodes.iter_mut().nth(1).unwrap().1;
+		second_node.create_some_transaction();
 
 		// Crank the network until no node has any input
 		crank_network(&nodes);
+
+		// Need to re-aquire the immutable reference to allow the second node to be acquired mutable.
+		let first_node = nodes.iter().nth(0).unwrap().1;
 
 		// This time we do expect a new block has been generated
 		assert_eq!(first_node.client.chain().best_block_number(), 1);

@@ -41,6 +41,15 @@ impl HbbftTestClient {
 			.unwrap();
 	}
 
+	// Trigger a generic transaction to force block creation.
+	pub fn create_some_transaction(&mut self) {
+		let transaction = create_transaction(&self.keypair, &self.nonce);
+		self.nonce += U256::from(1);
+		self.miner
+			.import_own_transaction(self.client.as_ref(), transaction.into())
+			.unwrap();
+	}
+
 	pub fn call(&mut self, receiver: &Address, abi_call: ethabi::Bytes, amount: &U256) {
 		self.call_as(&self.keypair.clone(), receiver, abi_call, amount);
 	}
@@ -122,14 +131,14 @@ pub fn hbbft_client_setup(keypair: KeyPair, net_info: NetworkInfo<Public>) -> Hb
 	}
 }
 
-pub fn create_transaction(keypair: &KeyPair) -> SignedTransaction {
+pub fn create_transaction(keypair: &KeyPair, nonce: &U256) -> SignedTransaction {
 	Transaction {
 		action: Action::Call(Address::from_low_u64_be(5798439875)),
 		value: U256::zero(),
 		data: vec![],
 		gas: U256::from(100_000),
 		gas_price: "10000000000".into(),
-		nonce: 1048576.into(),
+		nonce: *nonce,
 	}
 	.sign(keypair.secret(), None)
 }
@@ -167,11 +176,4 @@ pub fn create_call(
 		nonce: *nonce,
 	}
 	.sign(keypair.secret(), None)
-}
-
-pub fn inject_transaction(client: &Arc<Client>, miner: &Arc<Miner>, keypair: &KeyPair) {
-	let transaction = create_transaction(keypair);
-	miner
-		.import_own_transaction(client.as_ref(), transaction.into())
-		.unwrap();
 }
