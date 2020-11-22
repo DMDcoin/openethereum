@@ -62,3 +62,8 @@ pub fn is_pending_validator(
 	let c = BoundContract::bind(client, BlockId::Latest, *VALIDATOR_SET_ADDRESS);
 	call_const_validator!(c, is_pending_validator, staking_address.clone())
 }
+
+pub fn get_pending_validators(client: &dyn EngineClient) -> Result<Vec<Address>, CallError> {
+	let c = BoundContract::bind(client, BlockId::Latest, *VALIDATOR_SET_ADDRESS);
+	call_const_validator!(c, get_pending_validators)
+}

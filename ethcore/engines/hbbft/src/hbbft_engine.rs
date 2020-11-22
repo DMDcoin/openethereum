@@ -33,7 +33,9 @@ use crate::contracts::keygen_history::{
 	acks_of_address, engine_signer_to_synckeygen, part_of_address, synckeygen_to_network_info,
 	PublicWrapper,
 };
-use crate::contracts::validator_set::get_validator_pubkeys;
+use crate::contracts::validator_set::{
+	get_pending_validators, get_validator_pubkeys, is_pending_validator,
+};
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
 use crate::sealing::{self, RlpSig, Sealing};
 use crate::NodeId;
@@ -524,6 +526,32 @@ impl HoneyBadgerBFT {
 	fn client_arc(&self) -> Option<Arc<dyn EngineClient>> {
 		self.client.read().as_ref().and_then(Weak::upgrade)
 	}
+
+	fn new_key_generated(&self) -> bool {
+		match self.client_arc() {
+			None => false,
+			Some(client) => {
+				// If we are not in key generation phase, return false.
+				match get_pending_validators(&*client) {
+					Err(_) => return false,
+					Ok(validators) => {
+						if validators.is_empty() {
+							return false;
+						}
+					}
+				}
+
+				// @todo Check for generated key ready
+				match self.signer.read().as_ref() {
+					None => false,
+					Some(signer) => match is_pending_validator(&*client, &signer.address()) {
+						Ok(val) => val,
+						Err(_) => false,
+					},
+				}
+			}
+		}
+	}
 }
 
 impl Engine for HoneyBadgerBFT {
@@ -671,7 +699,7 @@ impl Engine for HoneyBadgerBFT {
 		if let Some(address) = self.params.block_reward_contract_address {
 			let mut call = engine::default_system_or_code_call(&self.machine, block);
 			let contract = BlockRewardContract::new_from_address(address);
-			let _total_reward = contract.reward(&mut call, false)?;
+			let _total_reward = contract.reward(&mut call, self.new_key_generated())?;
 		}
 		Ok(())
 	}
