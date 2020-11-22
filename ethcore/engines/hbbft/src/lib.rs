@@ -66,13 +66,18 @@ impl fmt::Display for NodeId {
 
 #[cfg(test)]
 mod tests {
+	use crate::contribution::unix_now_secs;
 	use crate::utils::test_helpers::{
 		create_hbbft_client, hbbft_client_setup, inject_transaction, HbbftTestClient,
 	};
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
-	use contracts::staking::tests::{create_staker, is_pool_active};
-	use contracts::validator_set::mining_by_staking_address;
+	use contracts::staking::tests::{
+		create_staker, is_pool_active, start_time_of_next_phase_transition,
+	};
+	use contracts::validator_set::{
+		is_pending_validator, mining_by_staking_address, staking_by_mining_address,
+	};
 	use ethereum_types::{Address, H256, U256};
 	use hash::keccak;
 	use hbbft::NetworkInfo;
@@ -192,6 +197,31 @@ mod tests {
 			is_pool_active(moc.client.as_ref(), staker_1.address())
 				.expect("Pool active query must succeed."),
 			true
+		);
+	}
+
+	#[test]
+	fn test_epoch_transition() {
+		// Create Master of Ceremonies
+		let mut moc = create_hbbft_client(MASTER_OF_CEREMONIES_KEYPAIR.clone());
+
+		let genesis_transition_time = start_time_of_next_phase_transition(moc.client.as_ref())
+			.expect("Constant call must succeed");
+
+		// Genesis block is at time 0, current unix time must be much larger.
+		assert!(genesis_transition_time.as_u64() < unix_now_secs());
+
+		// Trigger creation of a block.
+		// This implicitly calls the block reward contract, which should trigger a phase transition
+		// since we already verified that the genesis transition time threshold has been reached.
+		inject_transaction(&moc.client, &moc.miner, &moc.keypair);
+
+		// Expect a new block to be created.
+		assert_eq!(moc.client.chain().best_block_number(), 1);
+
+		assert!(
+			is_pending_validator(moc.client.as_ref(), &moc.address())
+				.expect("Constant call must succeed")
 		);
 	}
 

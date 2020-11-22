@@ -16,10 +16,10 @@ pub mod tests {
 	}
 
 	macro_rules! call_const_staking {
-	($c:ident, $x:ident $(, $a:expr )*) => {
-		$c.call_const(staking_contract::functions::$x::call($($a),*))
-	};
-}
+		($c:ident, $x:ident $(, $a:expr )*) => {
+			$c.call_const(staking_contract::functions::$x::call($($a),*))
+		};
+	}
 
 	pub fn min_staking(client: &dyn EngineClient) -> Result<U256, CallError> {
 		let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
@@ -32,6 +32,13 @@ pub mod tests {
 	) -> Result<bool, CallError> {
 		let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
 		call_const_staking!(c, is_pool_active, staking_address)
+	}
+
+	pub fn start_time_of_next_phase_transition(
+		client: &dyn EngineClient,
+	) -> Result<U256, CallError> {
+		let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
+		call_const_staking!(c, start_time_of_next_phase_transition)
 	}
 
 	pub fn add_pool(mining_address: Address, mining_public_key: Public) -> ethabi::Bytes {
