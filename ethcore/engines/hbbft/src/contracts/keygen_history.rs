@@ -1,3 +1,4 @@
+use crate::contracts::validator_set::get_validator_pubkeys;
 use crate::NodeId;
 use client_traits::EngineClient;
 use common_types::ids::BlockId;
@@ -9,6 +10,7 @@ use hbbft::sync_key_gen::{
 };
 use hbbft::util::max_faulty;
 use hbbft::NetworkInfo;
+use itertools::Itertools;
 use parity_crypto::publickey::Public;
 use parking_lot::RwLock;
 use std::collections::BTreeMap;
@@ -86,6 +88,9 @@ pub fn part_of_address(
 	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_part = call_const_key_history!(c, parts, address)?;
 	println!("Part for address {}: {:?}", address, serialized_part);
+	if serialized_part.is_empty() {
+		return Err(CallError::ReturnValueInvalid);
+	}
 	let deserialized_part: Part = bincode::deserialize(&serialized_part).unwrap();
 	let mut rng = rand::thread_rng();
 	let outcome = skg
@@ -113,6 +118,9 @@ pub fn acks_of_address(
 	for n in 0..serialized_length.low_u64() {
 		let serialized_ack = call_const_key_history!(c, acks, address, n)?;
 		println!("Ack #{} for address {}: {:?}", n, address, serialized_ack);
+		if serialized_ack.is_empty() {
+			return Err(CallError::ReturnValueInvalid);
+		}
 		let deserialized_ack: Ack = bincode::deserialize(&serialized_ack).unwrap();
 		let outcome = skg
 			.handle_ack(vmap.get(&address).unwrap(), deserialized_ack)
@@ -157,6 +165,32 @@ impl<'a> SecretKey for KeyPairWrapper {
 			.expect("Signer must be set!")
 			.decrypt(b"", ct)
 	}
+}
+
+/// Read available keygen data from the blockchain and initialize a SyncKeyGen instance with it.
+pub fn initialize_synckeygen(
+	client: &dyn EngineClient,
+	signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
+) -> Result<SyncKeyGen<Public, PublicWrapper>, CallError> {
+	let vmap = get_validator_pubkeys(&*client)?;
+	let pub_keys: BTreeMap<_, _> = vmap
+		.values()
+		.map(|p| (*p, PublicWrapper { inner: p.clone() }))
+		.collect();
+
+	// if synckeygen creation fails then either signer or validator pub keys are problematic.
+	// Todo: We should expect up to f clients to write invalid pub keys. Report and re-start pending validator set selection.
+	let (mut synckeygen, _) = engine_signer_to_synckeygen(signer, Arc::new(pub_keys))
+		.map_err(|_| CallError::ReturnValueInvalid)?;
+
+	for v in vmap.keys().sorted() {
+		part_of_address(&*client, *v, &vmap, &mut synckeygen)?;
+	}
+	for v in vmap.keys().sorted() {
+		acks_of_address(&*client, *v, &vmap, &mut synckeygen)?;
+	}
+
+	Ok(synckeygen)
 }
 
 #[cfg(test)]

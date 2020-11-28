@@ -30,8 +30,8 @@ use serde::Deserialize;
 use serde_json;
 
 use crate::contracts::keygen_history::{
-	acks_of_address, engine_signer_to_synckeygen, part_of_address, synckeygen_to_network_info,
-	PublicWrapper,
+	acks_of_address, engine_signer_to_synckeygen, initialize_synckeygen, part_of_address,
+	synckeygen_to_network_info, PublicWrapper,
 };
 use crate::contracts::validator_set::{
 	get_pending_validators, get_validator_pubkeys, is_pending_validator,
@@ -198,22 +198,8 @@ impl HoneyBadgerBFT {
 
 	fn try_init_honey_badger(&self) -> Option<()> {
 		let client = self.client_arc()?;
-		let vmap = get_validator_pubkeys(&*client).ok()?;
+		let synckeygen = initialize_synckeygen(&*client, &self.signer).ok()?;
 
-		let pub_keys: BTreeMap<_, _> = vmap
-			.values()
-			.map(|p| (*p, PublicWrapper { inner: p.clone() }))
-			.collect();
-
-		let (mut synckeygen, _) =
-			engine_signer_to_synckeygen(&self.signer, Arc::new(pub_keys)).ok()?;
-
-		for v in vmap.keys().sorted() {
-			assert!(part_of_address(&*client, *v, &vmap, &mut synckeygen).is_ok());
-		}
-		for v in vmap.keys().sorted() {
-			assert!(acks_of_address(&*client, *v, &vmap, &mut synckeygen).is_ok());
-		}
 		assert!(synckeygen.is_ready());
 		let (pks, sks) = synckeygen.generate().ok()?;
 		*self.public_master_key.write() = Some(pks.public_key());
@@ -527,7 +513,8 @@ impl HoneyBadgerBFT {
 		self.client.read().as_ref().and_then(Weak::upgrade)
 	}
 
-	fn new_key_generated(&self) -> bool {
+	/// Returns true if we are in the keygen phase and a new key has been generated.
+	fn do_keygen(&self) -> bool {
 		match self.client_arc() {
 			None => false,
 			Some(client) => {
@@ -541,11 +528,22 @@ impl HoneyBadgerBFT {
 					}
 				}
 
-				// @todo Check for generated key ready
+				// Check if key generation is already finished, return true if that is the case.
+				let synckeygen = initialize_synckeygen(&*client, &self.signer);
+				if let Ok(synckeygen) = initialize_synckeygen(&*client, &self.signer) {
+					if !synckeygen.is_ready() {
+						return true;
+					}
+				}
+
+				// Otherwise check if we are in the pending validator set and send Parts and Acks transactions.
 				match self.signer.read().as_ref() {
 					None => false,
 					Some(signer) => match is_pending_validator(&*client, &signer.address()) {
-						Ok(val) => val,
+						Ok(val) => {
+							// @todo actually send parts and acks transactions.
+							val
+						}
 						Err(_) => false,
 					},
 				}
@@ -699,7 +697,7 @@ impl Engine for HoneyBadgerBFT {
 		if let Some(address) = self.params.block_reward_contract_address {
 			let mut call = engine::default_system_or_code_call(&self.machine, block);
 			let contract = BlockRewardContract::new_from_address(address);
-			let _total_reward = contract.reward(&mut call, self.new_key_generated())?;
+			let _total_reward = contract.reward(&mut call, self.do_keygen())?;
 		}
 		Ok(())
 	}
