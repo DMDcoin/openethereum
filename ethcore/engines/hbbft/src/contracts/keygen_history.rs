@@ -1,9 +1,9 @@
 use crate::contracts::validator_set::get_validator_pubkeys;
 use crate::NodeId;
-use client_traits::EngineClient;
+use client_traits::{EngineClient, TransactionRequest};
 use common_types::ids::BlockId;
 use engine::signer::EngineSigner;
-use ethereum_types::{Address, H512};
+use ethereum_types::{Address, H512, U256};
 use hbbft::crypto::{PublicKeySet, SecretKeyShare};
 use hbbft::sync_key_gen::{
 	Ack, AckOutcome, Error, Part, PartOutcome, PubKeyMap, PublicKey, SecretKey, SyncKeyGen,
@@ -191,6 +191,59 @@ pub fn initialize_synckeygen(
 	}
 
 	Ok(synckeygen)
+}
+
+/// Returns a collection of transactions the pending validator has to submit in order to
+/// complete the keygen history contract data necessary to generate the next key and switch to the new validator set.
+pub fn get_keygen_transactions_to_send(
+	client: &dyn EngineClient,
+	signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
+) -> Result<(), CallError> {
+	// If we have no signer there is nothing for us to send.
+	let address = match signer.read().as_ref() {
+		Some(signer) => signer.address(),
+		None => return Err(CallError::ReturnValueInvalid),
+	};
+
+	let vmap = get_validator_pubkeys(&*client)?;
+	let pub_keys: BTreeMap<_, _> = vmap
+		.values()
+		.map(|p| (*p, PublicWrapper { inner: p.clone() }))
+		.collect();
+
+	// if synckeygen creation fails then either signer or validator pub keys are problematic.
+	// Todo: We should expect up to f clients to write invalid pub keys. Report and re-start pending validator set selection.
+	let (mut synckeygen, part) = engine_signer_to_synckeygen(signer, Arc::new(pub_keys))
+		.map_err(|_| CallError::ReturnValueInvalid)?;
+
+	// If there is no part then we are not part of the pending validator set and there is nothing for us to do.
+	let part_data = match part {
+		Some(part) => part,
+		None => return Err(CallError::ReturnValueInvalid),
+	};
+
+	// Check if we already sent our part.
+	let part_sent = part_of_address(client, address, &vmap, &mut synckeygen);
+
+	if let Err(CallError::ReturnValueInvalid) = part_sent {
+		// let us send our part
+		let full_client = client.as_full_client().ok_or(CallError::NotFullClient)?;
+
+		let serialized_part = match bincode::serialize(&part_data) {
+			Ok(part) => part,
+			Err(_) => return Err(CallError::ReturnValueInvalid),
+		};
+		let write_part_data = key_history_contract::functions::write_part::call(serialized_part);
+
+		let mut part_transaction =
+			TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_part_data.0)
+				.gas(U256::from(900_000))
+				.nonce(full_client.latest_nonce(&address))
+				.gas_price(U256::from(10000000000u64));
+		full_client.transact(part_transaction);
+	}
+
+	Ok(())
 }
 
 #[cfg(test)]

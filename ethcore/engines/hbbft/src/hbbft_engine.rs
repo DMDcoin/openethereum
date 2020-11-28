@@ -16,7 +16,7 @@ use common_types::{
 	BlockNumber,
 };
 use engine::{signer::EngineSigner, Engine};
-use ethereum_types::{H512, U256};
+use ethereum_types::{H256, H512, U256};
 use ethjson::spec::HbbftParams;
 use hbbft::crypto::PublicKey;
 use hbbft::honey_badger::{self, HoneyBadgerBuilder, Step};
@@ -24,14 +24,15 @@ use hbbft::{NetworkInfo, Target};
 use io::{IoContext, IoHandler, IoService, TimerToken};
 use itertools::Itertools;
 use machine::{ExecutedBlock, Machine};
+use parity_crypto::publickey::Signature;
 use parking_lot::RwLock;
 use rlp::{self, Decodable, Rlp};
 use serde::Deserialize;
 use serde_json;
 
 use crate::contracts::keygen_history::{
-	acks_of_address, engine_signer_to_synckeygen, initialize_synckeygen, part_of_address,
-	synckeygen_to_network_info, PublicWrapper,
+	acks_of_address, engine_signer_to_synckeygen, get_keygen_transactions_to_send,
+	initialize_synckeygen, part_of_address, synckeygen_to_network_info, PublicWrapper,
 };
 use crate::contracts::validator_set::{
 	get_pending_validators, get_validator_pubkeys, is_pending_validator,
@@ -522,16 +523,17 @@ impl HoneyBadgerBFT {
 				match get_pending_validators(&*client) {
 					Err(_) => return false,
 					Ok(validators) => {
+						// If the validator set is empty then we are not in the key generation phase.
 						if validators.is_empty() {
 							return false;
 						}
 					}
 				}
 
-				// Check if key generation is already finished, return true if that is the case.
+				// Check if a new key is ready to be generated, return true to switch to the new epoch in that case.
 				let synckeygen = initialize_synckeygen(&*client, &self.signer);
 				if let Ok(synckeygen) = initialize_synckeygen(&*client, &self.signer) {
-					if !synckeygen.is_ready() {
+					if synckeygen.is_ready() {
 						return true;
 					}
 				}
@@ -542,6 +544,7 @@ impl HoneyBadgerBFT {
 					Some(signer) => match is_pending_validator(&*client, &signer.address()) {
 						Ok(val) => {
 							// @todo actually send parts and acks transactions.
+							get_keygen_transactions_to_send(&*client, &self.signer);
 							val
 						}
 						Err(_) => false,
@@ -594,6 +597,15 @@ impl Engine for HoneyBadgerBFT {
 		*self.signer.write() = signer;
 		if let None = self.try_init_honey_badger() {
 			info!(target: "engine", "HoneyBadger Algorithm could not be created, Client possibly not set yet.");
+		}
+	}
+
+	fn sign(&self, hash: H256) -> Result<Signature, Error> {
+		match self.signer.read().as_ref() {
+			Some(signer) => signer
+				.sign(hash)
+				.map_err(|_| Error::Engine(EngineError::RequiresSigner)),
+			None => Err(Error::Engine(EngineError::RequiresSigner)),
 		}
 	}
 
