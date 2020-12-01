@@ -235,12 +235,11 @@ pub fn get_keygen_transactions_to_send(
 		};
 		let write_part_data = key_history_contract::functions::write_part::call(serialized_part);
 
-		let mut part_transaction =
-			TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_part_data.0)
-				.gas(U256::from(900_000))
-				.nonce(full_client.latest_nonce(&address))
-				.gas_price(U256::from(10000000000u64));
-		full_client.transact(part_transaction);
+		let part_transaction = TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_part_data.0)
+			.gas(U256::from(900_000))
+			.nonce(full_client.latest_nonce(&address))
+			.gas_price(U256::from(10000000000u64));
+		full_client.transact_silently(part_transaction);
 	}
 
 	Ok(())

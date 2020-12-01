@@ -37,16 +37,23 @@ impl HbbftTestClient {
 		let transaction = create_transfer(&self.keypair, receiver, amount, &self.nonce);
 		self.nonce += U256::from(1);
 		self.miner
-			.import_own_transaction(self.client.as_ref(), transaction.into())
+			.import_own_transaction(self.client.as_ref(), transaction.into(), false)
 			.unwrap();
 	}
 
 	// Trigger a generic transaction to force block creation.
-	pub fn create_some_transaction(&mut self) {
-		let transaction = create_transaction(&self.keypair, &self.nonce);
-		self.nonce += U256::from(1);
+	pub fn create_some_transaction(&mut self, caller: Option<&KeyPair>) {
+		let keypair = caller.unwrap_or(&self.keypair);
+		let cur_nonce = self
+			.client
+			.nonce(
+				&keypair.address(),
+				BlockId::Number(self.client.chain().best_block_number()),
+			)
+			.expect("Nonce for the current best block must always succeed");
+		let transaction = create_transaction(keypair, &cur_nonce);
 		self.miner
-			.import_own_transaction(self.client.as_ref(), transaction.into())
+			.import_own_transaction(self.client.as_ref(), transaction.into(), false)
 			.unwrap();
 	}
 

@@ -1087,10 +1087,14 @@ impl miner::MinerService for Miner {
 		results
 	}
 
+	/// Imports a single transaction using the "pending" transaction verifier.
+	/// # Arguments
+	/// * `silent` - Avoids calls into the consensus engine, just adds the transaction to the queue.
 	fn import_own_transaction<C: miner::BlockChainClient>(
 		&self,
 		chain: &C,
-		pending: PendingTransaction
+		pending: PendingTransaction,
+		silently: bool
 	) -> Result<(), transaction::Error> {
 		// note: you may want to use `import_claimed_local_transaction` instead of this one.
 
@@ -1106,7 +1110,7 @@ impl miner::MinerService for Miner {
 		// | NOTE Code below requires sealing locks.                                |
 		// | Make sure to release the locks before calling that method.             |
 		// --------------------------------------------------------------------------
-		if imported.is_ok() {
+		if !silently && imported.is_ok() {
 			self.engine.on_transactions_imported();
 			if self.options.reseal_on_own_tx && self.sealing.lock().reseal_allowed() {
 				self.prepare_and_update_sealing(chain);
@@ -1130,7 +1134,7 @@ impl miner::MinerService for Miner {
 			|| self.accounts.is_local(&sender);
 
 		if treat_as_local {
-			self.import_own_transaction(chain, pending)
+			self.import_own_transaction(chain, pending, false)
 		} else {
 			// We want to replicate behaviour for external transactions if we're not going to treat
 			// this as local. This is important with regards to sealing blocks

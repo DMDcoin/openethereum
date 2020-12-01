@@ -31,12 +31,9 @@ use serde::Deserialize;
 use serde_json;
 
 use crate::contracts::keygen_history::{
-	acks_of_address, engine_signer_to_synckeygen, get_keygen_transactions_to_send,
-	initialize_synckeygen, part_of_address, synckeygen_to_network_info, PublicWrapper,
+	get_keygen_transactions_to_send, initialize_synckeygen, synckeygen_to_network_info,
 };
-use crate::contracts::validator_set::{
-	get_pending_validators, get_validator_pubkeys, is_pending_validator,
-};
+use crate::contracts::validator_set::{get_pending_validators, is_pending_validator};
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
 use crate::sealing::{self, RlpSig, Sealing};
 use crate::NodeId;
@@ -531,7 +528,6 @@ impl HoneyBadgerBFT {
 				}
 
 				// Check if a new key is ready to be generated, return true to switch to the new epoch in that case.
-				let synckeygen = initialize_synckeygen(&*client, &self.signer);
 				if let Ok(synckeygen) = initialize_synckeygen(&*client, &self.signer) {
 					if synckeygen.is_ready() {
 						return true;

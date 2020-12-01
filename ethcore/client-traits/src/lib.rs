@@ -410,6 +410,10 @@ pub trait BlockChainClient:
 	/// Schedule state-altering transaction to be executed on the next pending
 	/// block with the given gas and nonce parameters.
 	fn transact(&self, tx_request: TransactionRequest) -> Result<(), transaction::Error>;
+
+	/// Same as transact(), but just adding the transaction to the queue, without calling back into the engine.
+	/// Used by engines to queue transactions without causing deadlocks due to re-entrant calls.
+	fn transact_silently(&self, tx_request: TransactionRequest) -> Result<(), transaction::Error>;
 }
 
 /// The data required for a `Client` to create a transaction.

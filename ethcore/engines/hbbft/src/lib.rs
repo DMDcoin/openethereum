@@ -73,9 +73,7 @@ mod tests {
 	use contracts::staking::tests::{
 		create_staker, is_pool_active, staking_epoch, start_time_of_next_phase_transition,
 	};
-	use contracts::validator_set::{
-		is_pending_validator, mining_by_staking_address, staking_by_mining_address,
-	};
+	use contracts::validator_set::{is_pending_validator, mining_by_staking_address};
 	use ethereum_types::{Address, H256, U256};
 	use hash::keccak;
 	use hbbft::NetworkInfo;
@@ -129,7 +127,7 @@ mod tests {
 		assert_eq!(test_data.client.chain().best_block_number(), 0);
 
 		// Inject a transaction, with instant sealing a block will be created right away.
-		test_data.create_some_transaction();
+		test_data.create_some_transaction(None);
 
 		// Expect a new block to be created.
 		assert_eq!(test_data.client.chain().best_block_number(), 1);
@@ -202,6 +200,8 @@ mod tests {
 	fn test_epoch_transition() {
 		// Create Master of Ceremonies
 		let mut moc = create_hbbft_client(MASTER_OF_CEREMONIES_KEYPAIR.clone());
+		// To avoid performing external transactions with the MoC we create and fund a random address.
+		let transactor: KeyPair = Random.generate();
 
 		let genesis_transition_time = start_time_of_next_phase_transition(moc.client.as_ref())
 			.expect("Constant call must succeed");
@@ -213,10 +213,12 @@ mod tests {
 		assert!(!is_pending_validator(moc.client.as_ref(), &moc.address())
 			.expect("Constant call must succeed"));
 
-		// Trigger creation of a block.
+		// Fund the transactor.
+		// Also triggers the creation of a block.
 		// This implicitly calls the block reward contract, which should trigger a phase transition
 		// since we already verified that the genesis transition time threshold has been reached.
-		moc.create_some_transaction();
+		let transaction_funds = U256::from(9000000000000000000u64);
+		moc.transfer_to(&transactor.address(), &transaction_funds);
 
 		// Expect a new block to be created.
 		assert_eq!(moc.client.chain().best_block_number(), 1);
@@ -232,12 +234,12 @@ mod tests {
 		);
 
 		// First the validator realizes it is in the next validator set and sends his part.
-		moc.create_some_transaction();
+		moc.create_some_transaction(Some(&transactor));
 		// With the next block the validator submits an Ack for his Part.
-		moc.create_some_transaction();
+		moc.create_some_transaction(Some(&transactor));
 		// In the next block all Parts and Acks are available, and the hbbft engine can
 		// call the block contract with the block transition with "_isEpochEndBlock" true.
-		moc.create_some_transaction();
+		moc.create_some_transaction(Some(&transactor));
 
 		// @todo: Implement sending of parts/acks transactions and sending _isEpochEndBlock to the block reward contract in the hbbft engine.
 
@@ -303,7 +305,7 @@ mod tests {
 			// Verify that we actually start at block 0.
 			assert_eq!(n.client.chain().best_block_number(), 0);
 			// Inject transactions to kick off block creation.
-			n.create_some_transaction();
+			n.create_some_transaction(None);
 		}
 
 		// Rudimentary network simulation.
@@ -348,7 +350,7 @@ mod tests {
 
 		// Get the first node as mutable reference and send a transaction to it.
 		let first_node: &mut HbbftTestClient = nodes.iter_mut().nth(0).unwrap().1;
-		first_node.create_some_transaction();
+		first_node.create_some_transaction(None);
 
 		// Crank the network until no node has any input
 		crank_network(&nodes);
@@ -361,7 +363,7 @@ mod tests {
 
 		// Get the second node and send a transaction to it.
 		let second_node = nodes.iter_mut().nth(1).unwrap().1;
-		second_node.create_some_transaction();
+		second_node.create_some_transaction(None);
 
 		// Crank the network until no node has any input
 		crank_network(&nodes);
