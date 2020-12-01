@@ -195,7 +195,7 @@ pub fn initialize_synckeygen(
 
 /// Returns a collection of transactions the pending validator has to submit in order to
 /// complete the keygen history contract data necessary to generate the next key and switch to the new validator set.
-pub fn get_keygen_transactions_to_send(
+pub fn send_keygen_transactions(
 	client: &dyn EngineClient,
 	signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 ) -> Result<(), CallError> {

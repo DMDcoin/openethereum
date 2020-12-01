@@ -31,7 +31,7 @@ use serde::Deserialize;
 use serde_json;
 
 use crate::contracts::keygen_history::{
-	get_keygen_transactions_to_send, initialize_synckeygen, synckeygen_to_network_info,
+	initialize_synckeygen, send_keygen_transactions, synckeygen_to_network_info,
 };
 use crate::contracts::validator_set::{get_pending_validators, is_pending_validator};
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
@@ -535,17 +535,14 @@ impl HoneyBadgerBFT {
 				}
 
 				// Otherwise check if we are in the pending validator set and send Parts and Acks transactions.
-				match self.signer.read().as_ref() {
-					None => false,
-					Some(signer) => match is_pending_validator(&*client, &signer.address()) {
-						Ok(val) => {
-							// @todo actually send parts and acks transactions.
-							get_keygen_transactions_to_send(&*client, &self.signer);
-							val
+				if let Some(signer) = self.signer.read().as_ref() {
+					if let Ok(is_pending) = is_pending_validator(&*client, &signer.address()) {
+						if is_pending {
+							send_keygen_transactions(&*client, &self.signer);
 						}
-						Err(_) => false,
-					},
+					}
 				}
+				false
 			}
 		}
 	}
