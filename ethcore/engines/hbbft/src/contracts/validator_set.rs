@@ -38,3 +38,33 @@ pub fn get_validator_pubkeys(
 	}
 	Ok(validator_map)
 }
+
+#[cfg(test)]
+pub fn mining_by_staking_address(
+	client: &dyn EngineClient,
+	staking_address: &Address,
+) -> Result<Address, CallError> {
+	let c = BoundContract::bind(client, BlockId::Latest, *VALIDATOR_SET_ADDRESS);
+	call_const_validator!(c, mining_by_staking_address, staking_address.clone())
+}
+
+// pub fn staking_by_mining_address(
+// 	client: &dyn EngineClient,
+// 	mining_address: &Address,
+// ) -> Result<Address, CallError> {
+// 	let c = BoundContract::bind(client, BlockId::Latest, *VALIDATOR_SET_ADDRESS);
+// 	call_const_validator!(c, staking_by_mining_address, mining_address.clone())
+// }
+
+pub fn is_pending_validator(
+	client: &dyn EngineClient,
+	staking_address: &Address,
+) -> Result<bool, CallError> {
+	let c = BoundContract::bind(client, BlockId::Latest, *VALIDATOR_SET_ADDRESS);
+	call_const_validator!(c, is_pending_validator, staking_address.clone())
+}
+
+pub fn get_pending_validators(client: &dyn EngineClient) -> Result<Vec<Address>, CallError> {
+	let c = BoundContract::bind(client, BlockId::Latest, *VALIDATOR_SET_ADDRESS);
+	call_const_validator!(c, get_pending_validators)
+}

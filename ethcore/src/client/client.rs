@@ -2209,7 +2209,12 @@ impl BlockChainClient for Client {
 
 	fn transact(&self, tx_request: TransactionRequest) -> Result<(), transaction::Error> {
 		let signed = self.create_transaction(tx_request)?;
-		self.importer.miner.import_own_transaction(self, signed.into())
+		self.importer.miner.import_own_transaction(self, signed.into(), false)
+	}
+
+	fn transact_silently(&self, tx_request: TransactionRequest) -> Result<(), transaction::Error> {
+		let signed = self.create_transaction(tx_request)?;
+		self.importer.miner.import_own_transaction(self, signed.into(), true)
 	}
 }
 

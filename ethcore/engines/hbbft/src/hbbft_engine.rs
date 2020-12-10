@@ -5,6 +5,7 @@ use std::ops::BitXor;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use crate::block_reward_hbbft::BlockRewardContract;
 use client_traits::{EngineClient, ForceUpdateSealing};
 use common_types::{
 	engines::{params::CommonParams, Seal, SealingState},
@@ -15,7 +16,7 @@ use common_types::{
 	BlockNumber,
 };
 use engine::{signer::EngineSigner, Engine};
-use ethereum_types::{H512, U256};
+use ethereum_types::{H256, H512, U256};
 use ethjson::spec::HbbftParams;
 use hbbft::crypto::PublicKey;
 use hbbft::honey_badger::{self, HoneyBadgerBuilder, Step};
@@ -23,16 +24,16 @@ use hbbft::{NetworkInfo, Target};
 use io::{IoContext, IoHandler, IoService, TimerToken};
 use itertools::Itertools;
 use machine::{ExecutedBlock, Machine};
+use parity_crypto::publickey::Signature;
 use parking_lot::RwLock;
 use rlp::{self, Decodable, Rlp};
 use serde::Deserialize;
 use serde_json;
 
 use crate::contracts::keygen_history::{
-	acks_of_address, engine_signer_to_synckeygen, part_of_address, synckeygen_to_network_info,
-	PublicWrapper,
+	initialize_synckeygen, send_keygen_transactions, synckeygen_to_network_info,
 };
-use crate::contracts::validator_set::get_validator_pubkeys;
+use crate::contracts::validator_set::{get_pending_validators, is_pending_validator};
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
 use crate::sealing::{self, RlpSig, Sealing};
 use crate::NodeId;
@@ -195,22 +196,8 @@ impl HoneyBadgerBFT {
 
 	fn try_init_honey_badger(&self) -> Option<()> {
 		let client = self.client_arc()?;
-		let vmap = get_validator_pubkeys(&*client).ok()?;
+		let synckeygen = initialize_synckeygen(&*client, &self.signer).ok()?;
 
-		let pub_keys: BTreeMap<_, _> = vmap
-			.values()
-			.map(|p| (*p, PublicWrapper { inner: p.clone() }))
-			.collect();
-
-		let (mut synckeygen, _) =
-			engine_signer_to_synckeygen(&self.signer, Arc::new(pub_keys)).ok()?;
-
-		for v in vmap.keys().sorted() {
-			assert!(part_of_address(&*client, *v, &vmap, &mut synckeygen).is_ok());
-		}
-		for v in vmap.keys().sorted() {
-			assert!(acks_of_address(&*client, *v, &vmap, &mut synckeygen).is_ok());
-		}
 		assert!(synckeygen.is_ready());
 		let (pks, sks) = synckeygen.generate().ok()?;
 		*self.public_master_key.write() = Some(pks.public_key());
@@ -265,7 +252,7 @@ impl HoneyBadgerBFT {
 			Some(t) => t,
 			None => {
 				error!(target: "consensus", "Error calculating the block timestamp");
-				return
+				return;
 			}
 		};
 
@@ -523,6 +510,42 @@ impl HoneyBadgerBFT {
 	fn client_arc(&self) -> Option<Arc<dyn EngineClient>> {
 		self.client.read().as_ref().and_then(Weak::upgrade)
 	}
+
+	/// Returns true if we are in the keygen phase and a new key has been generated.
+	fn do_keygen(&self) -> bool {
+		match self.client_arc() {
+			None => false,
+			Some(client) => {
+				// If we are not in key generation phase, return false.
+				match get_pending_validators(&*client) {
+					Err(_) => return false,
+					Ok(validators) => {
+						// If the validator set is empty then we are not in the key generation phase.
+						if validators.is_empty() {
+							return false;
+						}
+					}
+				}
+
+				// Check if a new key is ready to be generated, return true to switch to the new epoch in that case.
+				if let Ok(synckeygen) = initialize_synckeygen(&*client, &self.signer) {
+					if synckeygen.is_ready() {
+						return true;
+					}
+				}
+
+				// Otherwise check if we are in the pending validator set and send Parts and Acks transactions.
+				if let Some(signer) = self.signer.read().as_ref() {
+					if let Ok(is_pending) = is_pending_validator(&*client, &signer.address()) {
+						if is_pending {
+							send_keygen_transactions(&*client, &self.signer);
+						}
+					}
+				}
+				false
+			}
+		}
+	}
 }
 
 impl Engine for HoneyBadgerBFT {
@@ -567,6 +590,15 @@ impl Engine for HoneyBadgerBFT {
 		*self.signer.write() = signer;
 		if let None = self.try_init_honey_badger() {
 			info!(target: "engine", "HoneyBadger Algorithm could not be created, Client possibly not set yet.");
+		}
+	}
+
+	fn sign(&self, hash: H256) -> Result<Signature, Error> {
+		match self.signer.read().as_ref() {
+			Some(signer) => signer
+				.sign(hash)
+				.map_err(|_| Error::Engine(EngineError::RequiresSigner)),
+			None => Err(Error::Engine(EngineError::RequiresSigner)),
 		}
 	}
 
@@ -665,6 +697,15 @@ impl Engine for HoneyBadgerBFT {
 	fn use_block_author(&self) -> bool {
 		false
 	}
+
+	fn on_close_block(&self, block: &mut ExecutedBlock, _parent: &Header) -> Result<(), Error> {
+		if let Some(address) = self.params.block_reward_contract_address {
+			let mut call = engine::default_system_or_code_call(&self.machine, block);
+			let contract = BlockRewardContract::new_from_address(address);
+			let _total_reward = contract.reward(&mut call, self.do_keygen())?;
+		}
+		Ok(())
+	}
 }
 
 #[cfg(test)]
@@ -672,11 +713,12 @@ mod tests {
 	use crate::contribution::Contribution;
 	use crate::utils::test_helpers::create_transaction;
 	use common_types::transaction::SignedTransaction;
+	use ethereum_types::U256;
 	use hbbft::honey_badger::{HoneyBadger, HoneyBadgerBuilder};
 	use hbbft::NetworkInfo;
+	use parity_crypto::publickey::{Generator, Random};
 	use rand;
 	use std::sync::Arc;
-	use parity_crypto::publickey::{Random, Generator};
 
 	#[test]
 	fn test_single_contribution() {
@@ -695,7 +737,7 @@ mod tests {
 
 		let mut pending: Vec<SignedTransaction> = Vec::new();
 		let keypair = Random.generate();
-		pending.push(create_transaction(&keypair));
+		pending.push(create_transaction(&keypair, &U256::from(1)));
 		let input_contribution = Contribution::new(&pending);
 
 		let step = honey_badger

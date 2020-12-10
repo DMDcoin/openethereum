@@ -52,14 +52,15 @@ impl Contribution {
 mod tests {
 	use crate::utils::test_helpers::create_transaction;
 	use common_types::transaction::SignedTransaction;
+	use ethereum_types::U256;
+	use parity_crypto::publickey::{Generator, Random};
 	use rlp::{Decodable, Rlp};
-	use parity_crypto::publickey::{Random, Generator};
 
 	#[test]
 	fn test_contribution_serialization() {
 		let mut pending: Vec<SignedTransaction> = Vec::new();
 		let keypair = Random.generate();
-		pending.push(create_transaction(&keypair));
+		pending.push(create_transaction(&keypair, &U256::from(1)));
 		let contribution = super::Contribution::new(&pending);
 
 		let deser_txns: Vec<_> = contribution

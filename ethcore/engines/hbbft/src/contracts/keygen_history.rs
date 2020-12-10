@@ -1,14 +1,16 @@
+use crate::contracts::validator_set::get_validator_pubkeys;
 use crate::NodeId;
-use client_traits::EngineClient;
+use client_traits::{EngineClient, TransactionRequest};
 use common_types::ids::BlockId;
 use engine::signer::EngineSigner;
-use ethereum_types::{Address, H512};
+use ethereum_types::{Address, H512, U256};
 use hbbft::crypto::{PublicKeySet, SecretKeyShare};
 use hbbft::sync_key_gen::{
 	Ack, AckOutcome, Error, Part, PartOutcome, PubKeyMap, PublicKey, SecretKey, SyncKeyGen,
 };
 use hbbft::util::max_faulty;
 use hbbft::NetworkInfo;
+use itertools::Itertools;
 use parity_crypto::publickey::Public;
 use parking_lot::RwLock;
 use std::collections::BTreeMap;
@@ -86,6 +88,9 @@ pub fn part_of_address(
 	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_part = call_const_key_history!(c, parts, address)?;
 	println!("Part for address {}: {:?}", address, serialized_part);
+	if serialized_part.is_empty() {
+		return Err(CallError::ReturnValueInvalid);
+	}
 	let deserialized_part: Part = bincode::deserialize(&serialized_part).unwrap();
 	let mut rng = rand::thread_rng();
 	let outcome = skg
@@ -113,6 +118,9 @@ pub fn acks_of_address(
 	for n in 0..serialized_length.low_u64() {
 		let serialized_ack = call_const_key_history!(c, acks, address, n)?;
 		println!("Ack #{} for address {}: {:?}", n, address, serialized_ack);
+		if serialized_ack.is_empty() {
+			return Err(CallError::ReturnValueInvalid);
+		}
 		let deserialized_ack: Ack = bincode::deserialize(&serialized_ack).unwrap();
 		let outcome = skg
 			.handle_ack(vmap.get(&address).unwrap(), deserialized_ack)
@@ -157,6 +165,84 @@ impl<'a> SecretKey for KeyPairWrapper {
 			.expect("Signer must be set!")
 			.decrypt(b"", ct)
 	}
+}
+
+/// Read available keygen data from the blockchain and initialize a SyncKeyGen instance with it.
+pub fn initialize_synckeygen(
+	client: &dyn EngineClient,
+	signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
+) -> Result<SyncKeyGen<Public, PublicWrapper>, CallError> {
+	let vmap = get_validator_pubkeys(&*client)?;
+	let pub_keys: BTreeMap<_, _> = vmap
+		.values()
+		.map(|p| (*p, PublicWrapper { inner: p.clone() }))
+		.collect();
+
+	// if synckeygen creation fails then either signer or validator pub keys are problematic.
+	// Todo: We should expect up to f clients to write invalid pub keys. Report and re-start pending validator set selection.
+	let (mut synckeygen, _) = engine_signer_to_synckeygen(signer, Arc::new(pub_keys))
+		.map_err(|_| CallError::ReturnValueInvalid)?;
+
+	for v in vmap.keys().sorted() {
+		part_of_address(&*client, *v, &vmap, &mut synckeygen)?;
+	}
+	for v in vmap.keys().sorted() {
+		acks_of_address(&*client, *v, &vmap, &mut synckeygen)?;
+	}
+
+	Ok(synckeygen)
+}
+
+/// Returns a collection of transactions the pending validator has to submit in order to
+/// complete the keygen history contract data necessary to generate the next key and switch to the new validator set.
+pub fn send_keygen_transactions(
+	client: &dyn EngineClient,
+	signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
+) -> Result<(), CallError> {
+	// If we have no signer there is nothing for us to send.
+	let address = match signer.read().as_ref() {
+		Some(signer) => signer.address(),
+		None => return Err(CallError::ReturnValueInvalid),
+	};
+
+	let vmap = get_validator_pubkeys(&*client)?;
+	let pub_keys: BTreeMap<_, _> = vmap
+		.values()
+		.map(|p| (*p, PublicWrapper { inner: p.clone() }))
+		.collect();
+
+	// if synckeygen creation fails then either signer or validator pub keys are problematic.
+	// Todo: We should expect up to f clients to write invalid pub keys. Report and re-start pending validator set selection.
+	let (mut synckeygen, part) = engine_signer_to_synckeygen(signer, Arc::new(pub_keys))
+		.map_err(|_| CallError::ReturnValueInvalid)?;
+
+	// If there is no part then we are not part of the pending validator set and there is nothing for us to do.
+	let part_data = match part {
+		Some(part) => part,
+		None => return Err(CallError::ReturnValueInvalid),
+	};
+
+	// Check if we already sent our part.
+	let part_sent = part_of_address(client, address, &vmap, &mut synckeygen);
+
+	if let Err(CallError::ReturnValueInvalid) = part_sent {
+		// let us send our part
+		let full_client = client.as_full_client().ok_or(CallError::NotFullClient)?;
+
+		let serialized_part = match bincode::serialize(&part_data) {
+			Ok(part) => part,
+			Err(_) => return Err(CallError::ReturnValueInvalid),
+		};
+		let write_part_data = key_history_contract::functions::write_part::call(serialized_part);
+
+		let part_transaction = TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_part_data.0)
+			.gas(U256::from(900_000))
+			.nonce(full_client.latest_nonce(&address))
+			.gas_price(U256::from(10000000000u64));
+		full_client.transact_silently(part_transaction);
+	}
+
+	Ok(())
 }
 
 #[cfg(test)]

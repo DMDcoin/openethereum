@@ -145,7 +145,7 @@ pub trait MinerService : Send + Sync {
 		where C: BlockChainClient;
 
 	/// Imports own (node owner) transaction to queue.
-	fn import_own_transaction<C>(&self, chain: &C, transaction: PendingTransaction)
+	fn import_own_transaction<C>(&self, chain: &C, transaction: PendingTransaction, silently: bool)
 		-> Result<(), transaction::Error>
 		where C: BlockChainClient;
 

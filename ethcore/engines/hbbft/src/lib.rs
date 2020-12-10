@@ -38,6 +38,7 @@ extern crate spec;
 #[cfg(test)]
 extern crate toml;
 
+mod block_reward_hbbft;
 mod contracts;
 mod contribution;
 mod hbbft_engine;
@@ -65,22 +66,33 @@ impl fmt::Display for NodeId {
 
 #[cfg(test)]
 mod tests {
-	use crate::utils::test_helpers::{
-		hbbft_client_setup, hbbft_client_setup_from_contracts, inject_transaction, HbbftTestData,
-	};
+	use crate::contribution::unix_now_secs;
+	use crate::utils::test_helpers::{create_hbbft_client, hbbft_client_setup, HbbftTestClient};
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
-	use ethereum_types::H256;
+	use contracts::staking::tests::{
+		create_staker, is_pool_active, staking_epoch, start_time_of_next_phase_transition,
+	};
+	use contracts::validator_set::{is_pending_validator, mining_by_staking_address};
+	use ethereum_types::{Address, H256, U256};
 	use hash::keccak;
 	use hbbft::NetworkInfo;
 	use hbbft_testing::proptest::{gen_seed, TestRng, TestRngSeed};
-	use parity_crypto::publickey::{KeyPair, Public, Secret};
+	use parity_crypto::publickey::{Generator, KeyPair, Public, Random, Secret};
 	use proptest::{prelude::ProptestConfig, proptest};
 	use rand::{Rng, SeedableRng};
 	use std::collections::BTreeMap;
 	use std::str::FromStr;
 
-	fn generate_nodes<R: Rng>(size: usize, rng: &mut R) -> BTreeMap<Public, HbbftTestData> {
+	lazy_static! {
+		static ref MASTER_OF_CEREMONIES_KEYPAIR: KeyPair = KeyPair::from_secret(
+			Secret::from_str("f8ac48beec78b5b02968d564425c6b13e89f745d872c0d21791bbdb23fa5e31c")
+				.expect("Secret from hex string must succeed")
+		)
+		.expect("KeyPair generation from secret must succeed");
+	}
+
+	fn generate_nodes<R: Rng>(size: usize, rng: &mut R) -> BTreeMap<Public, HbbftTestClient> {
 		let keypairs: Vec<KeyPair> = (1..=size)
 			.map(|i| {
 				let secret = Secret::from(<[u8; 32]>::from(keccak(i.to_string())));
@@ -102,29 +114,20 @@ mod tests {
 			.collect()
 	}
 
-	fn generate_for_spec() -> HbbftTestData {
-		// Hard-coded secret, must match validator in contract!
-		let secret =
-			Secret::from_str("c7dea031415adbba4510ec3bf3b51f7a4ac7c6e6078bf5747bd128a925edb394")
-				.unwrap();
-		let keypair = KeyPair::from_secret(secret).expect("KeyPair generation must succeed");
-		hbbft_client_setup_from_contracts(keypair)
-	}
-
 	// Returns `true` if the node has any unsent messages left.
-	fn has_messages(node: &HbbftTestData) -> bool {
+	fn has_messages(node: &HbbftTestClient) -> bool {
 		!node.notify.targeted_messages.read().is_empty()
 	}
 
 	#[test]
 	fn test_miner_transaction_injection() {
-		let test_data = generate_for_spec();
+		let mut test_data = create_hbbft_client(MASTER_OF_CEREMONIES_KEYPAIR.clone());
 
 		// Verify that we actually start at block 0.
 		assert_eq!(test_data.client.chain().best_block_number(), 0);
 
 		// Inject a transaction, with instant sealing a block will be created right away.
-		inject_transaction(&test_data.client, &test_data.miner, &test_data.keypair);
+		test_data.create_some_transaction(None);
 
 		// Expect a new block to be created.
 		assert_eq!(test_data.client.chain().best_block_number(), 1);
@@ -137,7 +140,117 @@ mod tests {
 		assert_eq!(block.transactions_count(), 1);
 	}
 
-	fn crank_network_single_step(nodes: &BTreeMap<Public, HbbftTestData>) {
+	#[test]
+	fn test_staking_account_creation() {
+		// Create Master of Ceremonies
+		let mut moc = create_hbbft_client(MASTER_OF_CEREMONIES_KEYPAIR.clone());
+
+		// Verify the master of ceremony is funded.
+		assert!(moc.balance(&moc.address()) > U256::from(10000000));
+
+		// Create a potential validator.
+		let miner_1 = create_hbbft_client(Random.generate());
+
+		// Verify the pending validator is unfunded.
+		assert_eq!(moc.balance(&miner_1.address()), U256::from(0));
+
+		// Verify that we actually start at block 0.
+		assert_eq!(moc.client.chain().best_block_number(), 0);
+
+		let transaction_funds = U256::from(9000000000000000000u64);
+
+		// Inject a transaction, with instant sealing a block will be created right away.
+		moc.transfer_to(&miner_1.address(), &transaction_funds);
+
+		// Expect a new block to be created.
+		assert_eq!(moc.client.chain().best_block_number(), 1);
+
+		// Verify the pending validator is now funded.
+		assert_eq!(moc.balance(&miner_1.address()), transaction_funds);
+
+		// Create staking address
+		let staker_1 = create_staker(&mut moc, &miner_1, transaction_funds);
+
+		// Expect two new blocks to be created, one for the transfer of staking funds,
+		// one for registering the staker as pool.
+		assert_eq!(moc.client.chain().best_block_number(), 3);
+
+		// Expect one transaction in the block.
+		let block = moc
+			.client
+			.block(BlockId::Number(3))
+			.expect("Block must exist");
+		assert_eq!(block.transactions_count(), 1);
+
+		assert_ne!(
+			mining_by_staking_address(moc.client.as_ref(), &staker_1.address())
+				.expect("Constant call must succeed."),
+			Address::zero()
+		);
+
+		// Check if the staking pool is active.
+		assert_eq!(
+			is_pool_active(moc.client.as_ref(), staker_1.address())
+				.expect("Pool active query must succeed."),
+			true
+		);
+	}
+
+	#[test]
+	fn test_epoch_transition() {
+		// Create Master of Ceremonies
+		let mut moc = create_hbbft_client(MASTER_OF_CEREMONIES_KEYPAIR.clone());
+		// To avoid performing external transactions with the MoC we create and fund a random address.
+		let transactor: KeyPair = Random.generate();
+
+		let genesis_transition_time = start_time_of_next_phase_transition(moc.client.as_ref())
+			.expect("Constant call must succeed");
+
+		// Genesis block is at time 0, current unix time must be much larger.
+		assert!(genesis_transition_time.as_u64() < unix_now_secs());
+
+		// We should not be in the pending validator set at the genesis block.
+		assert!(!is_pending_validator(moc.client.as_ref(), &moc.address())
+			.expect("Constant call must succeed"));
+
+		// Fund the transactor.
+		// Also triggers the creation of a block.
+		// This implicitly calls the block reward contract, which should trigger a phase transition
+		// since we already verified that the genesis transition time threshold has been reached.
+		let transaction_funds = U256::from(9000000000000000000u64);
+		moc.transfer_to(&transactor.address(), &transaction_funds);
+
+		// Expect a new block to be created.
+		assert_eq!(moc.client.chain().best_block_number(), 1);
+
+		// Now we should be part of the pending validator set.
+		assert!(is_pending_validator(moc.client.as_ref(), &moc.address())
+			.expect("Constant call must succeed"));
+
+		// Check if we are still in the first epoch.
+		assert_eq!(
+			staking_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
+			U256::from(0)
+		);
+
+		// First the validator realizes it is in the next validator set and sends his part.
+		moc.create_some_transaction(Some(&transactor));
+		// With the next block the validator submits an Ack for his Part.
+		moc.create_some_transaction(Some(&transactor));
+		// In the next block all Parts and Acks are available, and the hbbft engine can
+		// call the block contract with the block transition with "_isEpochEndBlock" true.
+		moc.create_some_transaction(Some(&transactor));
+
+		// @todo: Implement sending of parts/acks transactions and sending _isEpochEndBlock to the block reward contract in the hbbft engine.
+
+		// At this point we should be in the new epoch.
+		// assert_eq!(
+		// 	staking_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
+		// 	U256::from(1)
+		// );
+	}
+
+	fn crank_network_single_step(nodes: &BTreeMap<Public, HbbftTestClient>) {
 		for (from, n) in nodes {
 			let mut targeted_messages = n.notify.targeted_messages.write();
 			for m in targeted_messages.drain(..) {
@@ -152,7 +265,7 @@ mod tests {
 		}
 	}
 
-	fn crank_network(nodes: &BTreeMap<Public, HbbftTestData>) {
+	fn crank_network(nodes: &BTreeMap<Public, HbbftTestClient>) {
 		while nodes.iter().any(|(_, test_data)| has_messages(test_data)) {
 			crank_network_single_step(nodes);
 		}
@@ -186,13 +299,13 @@ mod tests {
 	}
 
 	fn test_with_size<R: Rng>(rng: &mut R, size: usize) {
-		let nodes = generate_nodes(size, rng);
+		let mut nodes = generate_nodes(size, rng);
 
-		for (_, n) in &nodes {
+		for (_, n) in &mut nodes {
 			// Verify that we actually start at block 0.
 			assert_eq!(n.client.chain().best_block_number(), 0);
 			// Inject transactions to kick off block creation.
-			inject_transaction(&n.client, &n.miner, &n.keypair);
+			n.create_some_transaction(None);
 		}
 
 		// Rudimentary network simulation.
@@ -233,24 +346,30 @@ mod tests {
 		// Other nodes should *not* join the epoch if they receive only
 		// one contribution, but if 2 or more are received they should!
 		let network_size: usize = 4;
-		let nodes = generate_nodes(network_size, &mut rng);
+		let mut nodes = generate_nodes(network_size, &mut rng);
 
-		// Get the first node and send a transaction to it.
-		let first_node = &nodes.iter().nth(0).unwrap().1;
-		let second_node = &nodes.iter().nth(1).unwrap().1;
-		inject_transaction(&first_node.client, &first_node.miner, &first_node.keypair);
+		// Get the first node as mutable reference and send a transaction to it.
+		let first_node: &mut HbbftTestClient = nodes.iter_mut().nth(0).unwrap().1;
+		first_node.create_some_transaction(None);
 
 		// Crank the network until no node has any input
 		crank_network(&nodes);
+
+		// Cannot re-use the mutable reference to an element of nodes, re-acquire as immutable.
+		let first_node = nodes.iter().nth(0).unwrap().1;
 
 		// We expect no new block being generated in this case!
 		assert_eq!(first_node.client.chain().best_block_number(), 0);
 
 		// Get the second node and send a transaction to it.
-		inject_transaction(&second_node.client, &second_node.miner, &second_node.keypair);
+		let second_node = nodes.iter_mut().nth(1).unwrap().1;
+		second_node.create_some_transaction(None);
 
 		// Crank the network until no node has any input
 		crank_network(&nodes);
+
+		// Need to re-aquire the immutable reference to allow the second node to be acquired mutable.
+		let first_node = nodes.iter().nth(0).unwrap().1;
 
 		// This time we do expect a new block has been generated
 		assert_eq!(first_node.client.chain().best_block_number(), 1);
