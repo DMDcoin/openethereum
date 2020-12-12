@@ -180,12 +180,12 @@
     "constant": false,
     "inputs": [
       {
-        "internalType": "bytes",
-        "name": "_ack",
-        "type": "bytes"
+        "internalType": "bytes[]",
+        "name": "_acks",
+        "type": "bytes[]"
       }
     ],
-    "name": "writeAck",
+    "name": "writeAcks",
     "outputs": [],
     "payable": false,
     "stateMutability": "nonpayable",

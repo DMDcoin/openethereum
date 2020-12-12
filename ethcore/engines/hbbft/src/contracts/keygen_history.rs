@@ -79,12 +79,22 @@ pub fn synckeygen_to_network_info(
 	))
 }
 
+pub fn has_part_of_address_data(
+	client: &dyn EngineClient,
+	address: Address,
+) -> Result<bool, CallError> {
+	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
+	let serialized_part = call_const_key_history!(c, parts, address)?;
+	println!("Part for address {}: {:?}", address, serialized_part);
+	Ok(!serialized_part.is_empty())
+}
+
 pub fn part_of_address(
 	client: &dyn EngineClient,
 	address: Address,
 	vmap: &BTreeMap<Address, Public>,
 	skg: &mut SyncKeyGen<Public, PublicWrapper>,
-) -> Result<(), CallError> {
+) -> Result<Option<Ack>, CallError> {
 	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_part = call_const_key_history!(c, parts, address)?;
 	println!("Part for address {}: {:?}", address, serialized_part);
@@ -96,10 +106,20 @@ pub fn part_of_address(
 	let outcome = skg
 		.handle_part(vmap.get(&address).unwrap(), deserialized_part, &mut rng)
 		.unwrap();
-	if let PartOutcome::Invalid(fault) = outcome {
-		panic!("Expected Part Outcome to be valid. {}", fault);
+
+	match outcome {
+		PartOutcome::Invalid(fault) => Err(CallError::ReturnValueInvalid),
+		PartOutcome::Valid(ack) => Ok(ack),
 	}
-	Ok(())
+}
+
+pub fn has_acks_of_address_data(
+	client: &dyn EngineClient,
+	address: Address,
+) -> Result<bool, CallError> {
+	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
+	let serialized_length = call_const_key_history!(c, get_acks_length, address)?;
+	Ok(serialized_length.low_u64() != 0)
 }
 
 pub fn acks_of_address(
@@ -222,13 +242,11 @@ pub fn send_keygen_transactions(
 		None => return Err(CallError::ReturnValueInvalid),
 	};
 
+	// let us send our part
+	let full_client = client.as_full_client().ok_or(CallError::NotFullClient)?;
+
 	// Check if we already sent our part.
-	let part_sent = part_of_address(client, address, &vmap, &mut synckeygen);
-
-	if let Err(CallError::ReturnValueInvalid) = part_sent {
-		// let us send our part
-		let full_client = client.as_full_client().ok_or(CallError::NotFullClient)?;
-
+	if !has_part_of_address_data(client, address)? {
 		let serialized_part = match bincode::serialize(&part_data) {
 			Ok(part) => part,
 			Err(_) => return Err(CallError::ReturnValueInvalid),
@@ -240,6 +258,40 @@ pub fn send_keygen_transactions(
 			.nonce(full_client.latest_nonce(&address))
 			.gas_price(U256::from(10000000000u64));
 		full_client.transact_silently(part_transaction);
+	}
+
+	// Return if any Part is missing.
+	let mut acks = Vec::new();
+	for v in vmap.keys().sorted() {
+		acks.push(
+			match part_of_address(&*client, *v, &vmap, &mut synckeygen)? {
+				Some(ack) => ack,
+				None => return Err(CallError::ReturnValueInvalid),
+			},
+		);
+	}
+
+	// Now we are sure all parts are ready, let's check if we sent our Acks.
+	let acks_sent = acks_of_address(client, address, &vmap, &mut synckeygen);
+	if !has_acks_of_address_data(client, address)? {
+		let mut serialized_acks = Vec::new();
+		for ack in acks {
+			serialized_acks.push(match bincode::serialize(&ack) {
+				Ok(serialized_ack) => serialized_ack,
+				Err(_) => return Err(CallError::ReturnValueInvalid),
+			})
+		}
+		let write_acks_data = key_history_contract::functions::write_acks::call(serialized_acks);
+
+		let acks_transaction = TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_acks_data.0)
+			.gas(U256::from(900_000))
+			.nonce(full_client.latest_nonce(&address))
+			.gas_price(U256::from(10000000000u64));
+		full_client.transact_silently(acks_transaction);
+	}
+
+	for v in vmap.keys().sorted() {
+		let ack_sent = acks_of_address(&*client, *v, &vmap, &mut synckeygen);
 	}
 
 	Ok(())

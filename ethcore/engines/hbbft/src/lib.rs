@@ -86,7 +86,7 @@ mod tests {
 
 	lazy_static! {
 		static ref MASTER_OF_CEREMONIES_KEYPAIR: KeyPair = KeyPair::from_secret(
-			Secret::from_str("f8ac48beec78b5b02968d564425c6b13e89f745d872c0d21791bbdb23fa5e31c")
+			Secret::from_str("f8089d19e99ce1e14d33512794e6c58830fafc83d4581546fd34e4866ec940ae")
 				.expect("Secret from hex string must succeed")
 		)
 		.expect("KeyPair generation from secret must succeed");
@@ -235,19 +235,25 @@ mod tests {
 
 		// First the validator realizes it is in the next validator set and sends his part.
 		moc.create_some_transaction(Some(&transactor));
-		// With the next block the validator submits an Ack for his Part.
-		moc.create_some_transaction(Some(&transactor));
-		// In the next block all Parts and Acks are available, and the hbbft engine can
-		// call the block contract with the block transition with "_isEpochEndBlock" true.
+
+		// The part will be included in the block triggered by this transaction, but not part of the global state yet,
+		// so it sends the transaction another time.
 		moc.create_some_transaction(Some(&transactor));
 
-		// @todo: Implement sending of parts/acks transactions and sending _isEpochEndBlock to the block reward contract in the hbbft engine.
+		// Now the part is part of the global chain state, and we send our acks.
+		moc.create_some_transaction(Some(&transactor));
+
+		// The acks will be included in the block triggered by this transaction, but not part of the global state yet.
+		moc.create_some_transaction(Some(&transactor));
+
+		// Now the acks are part of the global block state, and the key generation is complete and the next epoch begins
+		moc.create_some_transaction(Some(&transactor));
 
 		// At this point we should be in the new epoch.
-		// assert_eq!(
-		// 	staking_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
-		// 	U256::from(1)
-		// );
+		assert_eq!(
+			staking_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
+			U256::from(1)
+		);
 	}
 
 	fn crank_network_single_step(nodes: &BTreeMap<Public, HbbftTestClient>) {
