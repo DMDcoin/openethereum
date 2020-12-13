@@ -70,8 +70,9 @@ mod tests {
 	use crate::utils::test_helpers::{create_hbbft_client, hbbft_client_setup, HbbftTestClient};
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
+	use contracts::staking::get_posdao_epoch;
 	use contracts::staking::tests::{
-		create_staker, is_pool_active, staking_epoch, start_time_of_next_phase_transition,
+		create_staker, is_pool_active, start_time_of_next_phase_transition,
 	};
 	use contracts::validator_set::{is_pending_validator, mining_by_staking_address};
 	use ethereum_types::{Address, H256, U256};
@@ -86,7 +87,7 @@ mod tests {
 
 	lazy_static! {
 		static ref MASTER_OF_CEREMONIES_KEYPAIR: KeyPair = KeyPair::from_secret(
-			Secret::from_str("f8ac48beec78b5b02968d564425c6b13e89f745d872c0d21791bbdb23fa5e31c")
+			Secret::from_str("cbce3ff80ac85dacb8c3d730705a97fcaba1c0dbd4216f8fe824c0baaa164467")
 				.expect("Secret from hex string must succeed")
 		)
 		.expect("KeyPair generation from secret must succeed");
@@ -229,25 +230,34 @@ mod tests {
 
 		// Check if we are still in the first epoch.
 		assert_eq!(
-			staking_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
+			get_posdao_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
 			U256::from(0)
 		);
 
 		// First the validator realizes it is in the next validator set and sends his part.
 		moc.create_some_transaction(Some(&transactor));
-		// With the next block the validator submits an Ack for his Part.
-		moc.create_some_transaction(Some(&transactor));
-		// In the next block all Parts and Acks are available, and the hbbft engine can
-		// call the block contract with the block transition with "_isEpochEndBlock" true.
+
+		// The part will be included in the block triggered by this transaction, but not part of the global state yet,
+		// so it sends the transaction another time.
 		moc.create_some_transaction(Some(&transactor));
 
-		// @todo: Implement sending of parts/acks transactions and sending _isEpochEndBlock to the block reward contract in the hbbft engine.
+		// Now the part is part of the global chain state, and we send our acks.
+		moc.create_some_transaction(Some(&transactor));
+
+		// The acks will be included in the block triggered by this transaction, but not part of the global state yet.
+		moc.create_some_transaction(Some(&transactor));
+
+		// Now the acks are part of the global block state, and the key generation is complete and the next epoch begins
+		moc.create_some_transaction(Some(&transactor));
 
 		// At this point we should be in the new epoch.
-		// assert_eq!(
-		// 	staking_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
-		// 	U256::from(1)
-		// );
+		assert_eq!(
+			get_posdao_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
+			U256::from(1)
+		);
+
+		// Let's do another one to check if the transition to the new honey badger and keys works.
+		moc.create_some_transaction(Some(&transactor));
 	}
 
 	fn crank_network_single_step(nodes: &BTreeMap<Public, HbbftTestClient>) {
