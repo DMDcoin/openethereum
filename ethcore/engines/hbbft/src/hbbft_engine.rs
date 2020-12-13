@@ -538,7 +538,7 @@ impl HoneyBadgerBFT {
 				if let Some(signer) = self.signer.read().as_ref() {
 					if let Ok(is_pending) = is_pending_validator(&*client, &signer.address()) {
 						if is_pending {
-							send_keygen_transactions(&*client, &self.signer);
+							let _err = send_keygen_transactions(&*client, &self.signer);
 						}
 					}
 				}

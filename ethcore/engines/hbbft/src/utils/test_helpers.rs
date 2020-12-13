@@ -57,10 +57,6 @@ impl HbbftTestClient {
 			.unwrap();
 	}
 
-	pub fn call(&mut self, receiver: &Address, abi_call: ethabi::Bytes, amount: &U256) {
-		self.call_as(&self.keypair.clone(), receiver, abi_call, amount);
-	}
-
 	pub fn call_as(
 		&mut self,
 		caller: &KeyPair,

@@ -447,7 +447,7 @@ impl Provider {
 			let public_tx_hash = public_tx.hash(chain_id);
 			let signature = self.accounts.sign(signer_account, public_tx_hash)?;
 			let signed = SignedTransaction::new(public_tx.with_signature(signature, chain_id))?;
-			match self.miner.import_own_transaction(&*self.client, signed.into()) {
+			match self.miner.import_own_transaction(&*self.client, signed.into(), false) {
 				Ok(_) => trace!(target: "privatetx", "Public transaction added to queue"),
 				Err(err) => {
 					warn!(target: "privatetx", "Failed to add transaction to queue, error: {:?}", err);

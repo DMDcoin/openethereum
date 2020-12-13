@@ -618,7 +618,7 @@ fn execute_impl<Cr, Rr>(
 		match store.pending_transactions() {
 			Ok(pending) => {
 				for pending_tx in pending {
-					if let Err(e) = miner.import_own_transaction(&*client, pending_tx) {
+					if let Err(e) = miner.import_own_transaction(&*client, pending_tx, false) {
 						warn!("Error importing saved transaction: {}", e)
 					}
 				}

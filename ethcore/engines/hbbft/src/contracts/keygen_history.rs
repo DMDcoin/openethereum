@@ -108,7 +108,7 @@ pub fn part_of_address(
 		.unwrap();
 
 	match outcome {
-		PartOutcome::Invalid(fault) => Err(CallError::ReturnValueInvalid),
+		PartOutcome::Invalid(_) => Err(CallError::ReturnValueInvalid),
 		PartOutcome::Valid(ack) => Ok(ack),
 	}
 }
@@ -257,7 +257,9 @@ pub fn send_keygen_transactions(
 			.gas(U256::from(900_000))
 			.nonce(full_client.latest_nonce(&address))
 			.gas_price(U256::from(10000000000u64));
-		full_client.transact_silently(part_transaction);
+		full_client
+			.transact_silently(part_transaction)
+			.map_err(|_| CallError::ReturnValueInvalid)?;
 	}
 
 	// Return if any Part is missing.
@@ -272,7 +274,6 @@ pub fn send_keygen_transactions(
 	}
 
 	// Now we are sure all parts are ready, let's check if we sent our Acks.
-	let acks_sent = acks_of_address(client, address, &vmap, &mut synckeygen);
 	if !has_acks_of_address_data(client, address)? {
 		let mut serialized_acks = Vec::new();
 		for ack in acks {
@@ -287,11 +288,9 @@ pub fn send_keygen_transactions(
 			.gas(U256::from(900_000))
 			.nonce(full_client.latest_nonce(&address))
 			.gas_price(U256::from(10000000000u64));
-		full_client.transact_silently(acks_transaction);
-	}
-
-	for v in vmap.keys().sorted() {
-		let ack_sent = acks_of_address(&*client, *v, &vmap, &mut synckeygen);
+		full_client
+			.transact_silently(acks_transaction)
+			.map_err(|_| CallError::ReturnValueInvalid)?;
 	}
 
 	Ok(())
