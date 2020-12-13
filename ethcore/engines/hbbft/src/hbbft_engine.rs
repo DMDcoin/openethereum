@@ -33,7 +33,7 @@ use serde_json;
 use crate::contracts::keygen_history::{
 	initialize_synckeygen, send_keygen_transactions, synckeygen_to_network_info,
 };
-use crate::contracts::staking::get_posdao_epoch_start;
+use crate::contracts::staking::{get_posdao_epoch, get_posdao_epoch_start};
 use crate::contracts::validator_set::{get_pending_validators, is_pending_validator};
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
 use crate::sealing::{self, RlpSig, Sealing};
@@ -61,6 +61,7 @@ pub struct HoneyBadgerBFT {
 	network_info: RwLock<Option<NetworkInfo<NodeId>>>,
 	honey_badger: RwLock<Option<HoneyBadger>>,
 	public_master_key: RwLock<Option<PublicKey>>,
+	current_posdao_epoch: RwLock<u64>,
 	sealing: RwLock<BTreeMap<BlockNumber, Sealing>>,
 	params: HbbftParams,
 	message_counter: RwLock<usize>,
@@ -169,6 +170,7 @@ impl HoneyBadgerBFT {
 			network_info: RwLock::new(None),
 			honey_badger: RwLock::new(None),
 			public_master_key: RwLock::new(None),
+			current_posdao_epoch: RwLock::new(0),
 			sealing: RwLock::new(BTreeMap::new()),
 			params,
 			message_counter: RwLock::new(0),
@@ -197,17 +199,22 @@ impl HoneyBadgerBFT {
 
 	fn try_init_honey_badger(&self) -> Option<()> {
 		let client = self.client_arc()?;
-		let posdao_epoch = get_posdao_epoch_start(&*client).ok()?;
+		let posdao_epoch_start = get_posdao_epoch_start(&*client).ok()?;
 		let synckeygen = initialize_synckeygen(
 			&*client,
 			&self.signer,
-			BlockId::Number(posdao_epoch.low_u64()),
+			BlockId::Number(posdao_epoch_start.low_u64()),
 		)
 		.ok()?;
-
 		assert!(synckeygen.is_ready());
+
 		let (pks, sks) = synckeygen.generate().ok()?;
 		*self.public_master_key.write() = Some(pks.public_key());
+		// Clear network info and honey badger instance, since we may not be in this POSDAO epoch any more.
+		*self.network_info.write() = None;
+		*self.honey_badger.write() = None;
+		// Set the current POSDAO epoch #
+		*self.current_posdao_epoch.write() = get_posdao_epoch(&*client).ok()?.low_u64();
 		if sks.is_none() {
 			info!(target: "engine", "We are not part of the HoneyBadger validator set - running as regular node.");
 			return Some(());
@@ -536,7 +543,9 @@ impl HoneyBadgerBFT {
 				}
 
 				// Check if a new key is ready to be generated, return true to switch to the new epoch in that case.
-				if let Ok(synckeygen) = initialize_synckeygen(&*client, &self.signer, BlockId::Latest) {
+				if let Ok(synckeygen) =
+					initialize_synckeygen(&*client, &self.signer, BlockId::Latest)
+				{
 					if synckeygen.is_ready() {
 						return true;
 					}
@@ -554,6 +563,16 @@ impl HoneyBadgerBFT {
 			}
 		}
 	}
+
+	fn check_for_epoch_change(&self) -> Option<()> {
+		let client = self.client_arc()?;
+		if *self.current_posdao_epoch.read() != get_posdao_epoch(&*client).ok()?.low_u64() {
+			if let None = self.try_init_honey_badger() {
+				info!(target: "engine", "Fatal: Updating Honey Badger instance failed!");
+			}
+		}
+		Some(())
+	}
 }
 
 impl Engine for HoneyBadgerBFT {
@@ -566,10 +585,12 @@ impl Engine for HoneyBadgerBFT {
 	}
 
 	fn verify_local_seal(&self, _header: &Header) -> Result<(), Error> {
+		self.check_for_epoch_change();
 		Ok(())
 	}
 
 	fn verify_block_basic(&self, header: &Header) -> Result<(), Error> {
+		self.check_for_epoch_change();
 		if header.seal().len() != 1 {
 			return Err(BlockError::InvalidSeal.into());
 		}
@@ -614,6 +635,7 @@ impl Engine for HoneyBadgerBFT {
 		&self,
 		block: &ExecutedBlock,
 	) -> Result<Vec<SignedTransaction>, Error> {
+		self.check_for_epoch_change();
 		let _random_number = match self.random_numbers.read().get(&block.header.number()) {
 			None => {
 				return Err(Error::Engine(EngineError::Custom(
@@ -648,6 +670,7 @@ impl Engine for HoneyBadgerBFT {
 	}
 
 	fn on_transactions_imported(&self) {
+		self.check_for_epoch_change();
 		if let Some(client) = self.client_arc() {
 			if self.transaction_queue_and_time_thresholds_reached(&client) {
 				self.start_hbbft_epoch(client);
@@ -656,6 +679,7 @@ impl Engine for HoneyBadgerBFT {
 	}
 
 	fn handle_message(&self, message: &[u8], node_id: Option<H512>) -> Result<(), EngineError> {
+		self.check_for_epoch_change();
 		let node_id = NodeId(node_id.ok_or(EngineError::UnexpectedMessage)?);
 		match serde_json::from_slice(message) {
 			Ok(Message::HoneyBadger(msg_idx, hb_msg)) => {
@@ -707,6 +731,7 @@ impl Engine for HoneyBadgerBFT {
 	}
 
 	fn on_close_block(&self, block: &mut ExecutedBlock, _parent: &Header) -> Result<(), Error> {
+		self.check_for_epoch_change();
 		if let Some(address) = self.params.block_reward_contract_address {
 			let mut call = engine::default_system_or_code_call(&self.machine, block);
 			let contract = BlockRewardContract::new_from_address(address);

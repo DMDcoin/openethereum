@@ -17,6 +17,11 @@ macro_rules! call_const_staking {
 		};
 	}
 
+pub fn get_posdao_epoch(client: &dyn EngineClient) -> Result<U256, CallError> {
+	let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
+	call_const_staking!(c, staking_epoch)
+}
+
 pub fn get_posdao_epoch_start(client: &dyn EngineClient) -> Result<U256, CallError> {
 	let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
 	call_const_staking!(c, staking_epoch_start_block)
@@ -46,11 +51,6 @@ pub mod tests {
 	) -> Result<U256, CallError> {
 		let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
 		call_const_staking!(c, start_time_of_next_phase_transition)
-	}
-
-	pub fn staking_epoch(client: &dyn EngineClient) -> Result<U256, CallError> {
-		let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
-		call_const_staking!(c, staking_epoch)
 	}
 
 	pub fn add_pool(mining_address: Address, mining_public_key: Public) -> ethabi::Bytes {
