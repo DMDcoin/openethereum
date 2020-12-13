@@ -94,8 +94,9 @@ pub fn part_of_address(
 	address: Address,
 	vmap: &BTreeMap<Address, Public>,
 	skg: &mut SyncKeyGen<Public, PublicWrapper>,
+	block_id: BlockId,
 ) -> Result<Option<Ack>, CallError> {
-	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
+	let c = BoundContract::bind(client, block_id, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_part = call_const_key_history!(c, parts, address)?;
 	println!("Part for address {}: {:?}", address, serialized_part);
 	if serialized_part.is_empty() {
@@ -127,8 +128,9 @@ pub fn acks_of_address(
 	address: Address,
 	vmap: &BTreeMap<Address, Public>,
 	skg: &mut SyncKeyGen<Public, PublicWrapper>,
+	block_id: BlockId,
 ) -> Result<(), CallError> {
-	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
+	let c = BoundContract::bind(client, block_id, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_length = call_const_key_history!(c, get_acks_length, address)?;
 
 	println!(
@@ -191,9 +193,9 @@ impl<'a> SecretKey for KeyPairWrapper {
 pub fn initialize_synckeygen(
 	client: &dyn EngineClient,
 	signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
-	_block_id: BlockId,
+	block_id: BlockId,
 ) -> Result<SyncKeyGen<Public, PublicWrapper>, CallError> {
-	let vmap = get_validator_pubkeys(&*client)?;
+	let vmap = get_validator_pubkeys(&*client, block_id)?;
 	let pub_keys: BTreeMap<_, _> = vmap
 		.values()
 		.map(|p| (*p, PublicWrapper { inner: p.clone() }))
@@ -205,10 +207,10 @@ pub fn initialize_synckeygen(
 		.map_err(|_| CallError::ReturnValueInvalid)?;
 
 	for v in vmap.keys().sorted() {
-		part_of_address(&*client, *v, &vmap, &mut synckeygen)?;
+		part_of_address(&*client, *v, &vmap, &mut synckeygen, block_id)?;
 	}
 	for v in vmap.keys().sorted() {
-		acks_of_address(&*client, *v, &vmap, &mut synckeygen)?;
+		acks_of_address(&*client, *v, &vmap, &mut synckeygen, block_id)?;
 	}
 
 	Ok(synckeygen)
@@ -226,7 +228,7 @@ pub fn send_keygen_transactions(
 		None => return Err(CallError::ReturnValueInvalid),
 	};
 
-	let vmap = get_validator_pubkeys(&*client)?;
+	let vmap = get_validator_pubkeys(&*client, BlockId::Latest)?;
 	let pub_keys: BTreeMap<_, _> = vmap
 		.values()
 		.map(|p| (*p, PublicWrapper { inner: p.clone() }))
@@ -267,7 +269,7 @@ pub fn send_keygen_transactions(
 	let mut acks = Vec::new();
 	for v in vmap.keys().sorted() {
 		acks.push(
-			match part_of_address(&*client, *v, &vmap, &mut synckeygen)? {
+			match part_of_address(&*client, *v, &vmap, &mut synckeygen, BlockId::Latest)? {
 				Some(ack) => ack,
 				None => return Err(CallError::ReturnValueInvalid),
 			},
