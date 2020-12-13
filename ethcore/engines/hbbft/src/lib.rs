@@ -86,7 +86,7 @@ mod tests {
 
 	lazy_static! {
 		static ref MASTER_OF_CEREMONIES_KEYPAIR: KeyPair = KeyPair::from_secret(
-			Secret::from_str("f8089d19e99ce1e14d33512794e6c58830fafc83d4581546fd34e4866ec940ae")
+			Secret::from_str("0edee6e49e5dd0f80d567b53a6e0582c6af7a10e256f737a3c220c10555ba404")
 				.expect("Secret from hex string must succeed")
 		)
 		.expect("KeyPair generation from secret must succeed");
