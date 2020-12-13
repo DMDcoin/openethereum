@@ -1,25 +1,32 @@
-#[cfg(test)]
-pub mod tests {
-	use crate::utils::test_helpers::HbbftTestClient;
-	use client_traits::EngineClient;
-	use common_types::ids::BlockId;
-	use ethereum_types::{Address, U256};
-	use parity_crypto::publickey::{Generator, KeyPair, Public, Random};
-	use std::str::FromStr;
-	use utils::bound_contract::{BoundContract, CallError};
+use client_traits::EngineClient;
+use common_types::ids::BlockId;
+use ethereum_types::{Address, U256};
+use std::str::FromStr;
+use utils::bound_contract::{BoundContract, CallError};
 
-	use_contract!(staking_contract, "res/staking_contract.json");
+use_contract!(staking_contract, "res/staking_contract.json");
 
-	lazy_static! {
-		static ref STAKING_CONTRACT_ADDRESS: Address =
-			Address::from_str("1100000000000000000000000000000000000001").unwrap();
-	}
+lazy_static! {
+	static ref STAKING_CONTRACT_ADDRESS: Address =
+		Address::from_str("1100000000000000000000000000000000000001").unwrap();
+}
 
-	macro_rules! call_const_staking {
+macro_rules! call_const_staking {
 		($c:ident, $x:ident $(, $a:expr )*) => {
 			$c.call_const(staking_contract::functions::$x::call($($a),*))
 		};
 	}
+
+pub fn get_posdao_epoch_start(client: &dyn EngineClient) -> Result<U256, CallError> {
+	let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
+	call_const_staking!(c, staking_epoch_start_block)
+}
+
+#[cfg(test)]
+pub mod tests {
+	use super::*;
+	use crate::utils::test_helpers::HbbftTestClient;
+	use parity_crypto::publickey::{Generator, KeyPair, Public, Random};
 
 	pub fn min_staking(client: &dyn EngineClient) -> Result<U256, CallError> {
 		let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);

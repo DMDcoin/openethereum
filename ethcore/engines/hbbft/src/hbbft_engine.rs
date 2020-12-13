@@ -33,6 +33,7 @@ use serde_json;
 use crate::contracts::keygen_history::{
 	initialize_synckeygen, send_keygen_transactions, synckeygen_to_network_info,
 };
+use crate::contracts::staking::get_posdao_epoch_start;
 use crate::contracts::validator_set::{get_pending_validators, is_pending_validator};
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
 use crate::sealing::{self, RlpSig, Sealing};
@@ -196,7 +197,13 @@ impl HoneyBadgerBFT {
 
 	fn try_init_honey_badger(&self) -> Option<()> {
 		let client = self.client_arc()?;
-		let synckeygen = initialize_synckeygen(&*client, &self.signer).ok()?;
+		let posdao_epoch = get_posdao_epoch_start(&*client).ok()?;
+		let synckeygen = initialize_synckeygen(
+			&*client,
+			&self.signer,
+			BlockId::Number(posdao_epoch.low_u64()),
+		)
+		.ok()?;
 
 		assert!(synckeygen.is_ready());
 		let (pks, sks) = synckeygen.generate().ok()?;
@@ -440,6 +447,7 @@ impl HoneyBadgerBFT {
 	/// Conditionally joins the current hbbft epoch if the number of received
 	/// contributions exceeds the maximum number of tolerated faulty nodes.
 	fn join_hbbft_epoch(&self, honey_badger: &mut HoneyBadger) {
+		// If we already sent our input we already joined the current epoch.
 		if honey_badger.has_input() {
 			return;
 		}
@@ -528,7 +536,7 @@ impl HoneyBadgerBFT {
 				}
 
 				// Check if a new key is ready to be generated, return true to switch to the new epoch in that case.
-				if let Ok(synckeygen) = initialize_synckeygen(&*client, &self.signer) {
+				if let Ok(synckeygen) = initialize_synckeygen(&*client, &self.signer, BlockId::Latest) {
 					if synckeygen.is_ready() {
 						return true;
 					}
@@ -657,7 +665,7 @@ impl Engine for HoneyBadgerBFT {
 				self.process_sealing_message(seal_msg, node_id, block_num)
 			}
 			Err(_) => Err(EngineError::MalformedMessage(
-				"Serde decoding failed.".into(),
+				"Serde message decoding failed.".into(),
 			)),
 		}
 	}

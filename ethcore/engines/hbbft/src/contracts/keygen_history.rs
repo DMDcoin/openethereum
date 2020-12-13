@@ -191,6 +191,7 @@ impl<'a> SecretKey for KeyPairWrapper {
 pub fn initialize_synckeygen(
 	client: &dyn EngineClient,
 	signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
+	_block_id: BlockId,
 ) -> Result<SyncKeyGen<Public, PublicWrapper>, CallError> {
 	let vmap = get_validator_pubkeys(&*client)?;
 	let pub_keys: BTreeMap<_, _> = vmap
