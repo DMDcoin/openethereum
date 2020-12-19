@@ -38,6 +38,7 @@ use crate::contracts::validator_set::{get_pending_validators, is_pending_validat
 use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
 use crate::sealing::{self, RlpSig, Sealing};
 use crate::NodeId;
+use crate::hbbft_state::HbbftState;
 
 type HoneyBadger = honey_badger::HoneyBadger<Contribution, NodeId>;
 type Batch = honey_badger::Batch<Contribution, NodeId>;
@@ -58,6 +59,7 @@ pub struct HoneyBadgerBFT {
 	client: Arc<RwLock<Option<Weak<dyn EngineClient>>>>,
 	signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 	machine: Machine,
+	hbbft_state: RwLock<HbbftState>,
 	network_info: RwLock<Option<NetworkInfo<NodeId>>>,
 	honey_badger: RwLock<Option<HoneyBadger>>,
 	public_master_key: RwLock<Option<PublicKey>>,
@@ -167,6 +169,7 @@ impl HoneyBadgerBFT {
 			client: Arc::new(RwLock::new(None)),
 			signer: Arc::new(RwLock::new(None)),
 			machine,
+			hbbft_state: RwLock::new(HbbftState::new()),
 			network_info: RwLock::new(None),
 			honey_badger: RwLock::new(None),
 			public_master_key: RwLock::new(None),
