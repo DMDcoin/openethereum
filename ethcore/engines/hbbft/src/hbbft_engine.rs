@@ -18,9 +18,7 @@ use common_types::{
 use engine::{signer::EngineSigner, Engine};
 use ethereum_types::{H256, H512, U256};
 use ethjson::spec::HbbftParams;
-use hbbft::crypto::PublicKey;
-use hbbft::honey_badger::{self, HoneyBadgerBuilder, Step};
-use hbbft::{NetworkInfo, Target};
+use hbbft::Target;
 use io::{IoContext, IoHandler, IoService, TimerToken};
 use itertools::Itertools;
 use machine::{ExecutedBlock, Machine};
@@ -30,20 +28,14 @@ use rlp::{self, Decodable, Rlp};
 use serde::Deserialize;
 use serde_json;
 
-use crate::contracts::keygen_history::{
-	initialize_synckeygen, send_keygen_transactions, synckeygen_to_network_info,
-};
-use crate::contracts::staking::{get_posdao_epoch, get_posdao_epoch_start};
+use crate::contracts::keygen_history::{initialize_synckeygen, send_keygen_transactions};
 use crate::contracts::validator_set::{get_pending_validators, is_pending_validator};
-use crate::contribution::{unix_now_millis, unix_now_secs, Contribution};
+use crate::contribution::{unix_now_millis, unix_now_secs};
+use crate::hbbft_state::{Batch, HbMessage, HbbftState, HoneyBadgerStep};
 use crate::sealing::{self, RlpSig, Sealing};
 use crate::NodeId;
-use crate::hbbft_state::HbbftState;
 
-type HoneyBadger = honey_badger::HoneyBadger<Contribution, NodeId>;
-type Batch = honey_badger::Batch<Contribution, NodeId>;
 type TargetedMessage = hbbft::TargetedMessage<Message, NodeId>;
-type HbMessage = honey_badger::Message<NodeId>;
 
 /// A message sent between validators that is part of Honey Badger BFT or the block sealing process.
 #[derive(Debug, Deserialize, Serialize)]
@@ -60,10 +52,6 @@ pub struct HoneyBadgerBFT {
 	signer: Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 	machine: Machine,
 	hbbft_state: RwLock<HbbftState>,
-	network_info: RwLock<Option<NetworkInfo<NodeId>>>,
-	honey_badger: RwLock<Option<HoneyBadger>>,
-	public_master_key: RwLock<Option<PublicKey>>,
-	current_posdao_epoch: RwLock<u64>,
 	sealing: RwLock<BTreeMap<BlockNumber, Sealing>>,
 	params: HbbftParams,
 	message_counter: RwLock<usize>,
@@ -170,10 +158,6 @@ impl HoneyBadgerBFT {
 			signer: Arc::new(RwLock::new(None)),
 			machine,
 			hbbft_state: RwLock::new(HbbftState::new()),
-			network_info: RwLock::new(None),
-			honey_badger: RwLock::new(None),
-			public_master_key: RwLock::new(None),
-			current_posdao_epoch: RwLock::new(0),
 			sealing: RwLock::new(BTreeMap::new()),
 			params,
 			message_counter: RwLock::new(0),
@@ -192,43 +176,6 @@ impl HoneyBadgerBFT {
 		}
 
 		Ok(engine)
-	}
-
-	fn new_honey_badger(&self, network_info: NetworkInfo<NodeId>) -> Option<HoneyBadger> {
-		let mut builder: HoneyBadgerBuilder<Contribution, _> =
-			HoneyBadger::builder(Arc::new(network_info));
-		return Some(builder.build());
-	}
-
-	fn try_init_honey_badger(&self) -> Option<()> {
-		let client = self.client_arc()?;
-		let posdao_epoch_start = get_posdao_epoch_start(&*client).ok()?;
-		let synckeygen = initialize_synckeygen(
-			&*client,
-			&self.signer,
-			BlockId::Number(posdao_epoch_start.low_u64()),
-		)
-		.ok()?;
-		assert!(synckeygen.is_ready());
-
-		let (pks, sks) = synckeygen.generate().ok()?;
-		*self.public_master_key.write() = Some(pks.public_key());
-		// Clear network info and honey badger instance, since we may not be in this POSDAO epoch any more.
-		*self.network_info.write() = None;
-		*self.honey_badger.write() = None;
-		// Set the current POSDAO epoch #
-		*self.current_posdao_epoch.write() = get_posdao_epoch(&*client).ok()?.low_u64();
-		if sks.is_none() {
-			info!(target: "engine", "We are not part of the HoneyBadger validator set - running as regular node.");
-			return Some(());
-		}
-
-		let network_info = synckeygen_to_network_info(&synckeygen, pks, sks)?;
-		*self.network_info.write() = Some(network_info.clone());
-		*self.honey_badger.write() = Some(self.new_honey_badger(network_info)?);
-
-		info!(target: "engine", "HoneyBadger Algorithm initialized! Running as validator node.");
-		Some(())
 	}
 
 	fn process_output(&self, client: Arc<dyn EngineClient>, output: Vec<Batch>) {
@@ -322,20 +269,16 @@ impl HoneyBadgerBFT {
 	) -> Result<(), EngineError> {
 		let client = self.client_arc().ok_or(EngineError::RequiresClient)?;
 		trace!(target: "consensus", "Received message of idx {}  {:?} from {}", msg_idx, message, sender_id);
-		self.honey_badger
+		let step = self
+			.hbbft_state
 			.write()
-			.as_mut()
-			.map(|honey_badger: &mut HoneyBadger| {
-				self.skip_to_current_epoch(&client, honey_badger);
-				if let Ok(step) = honey_badger.handle_message(&sender_id, message) {
-					self.process_step(client, step);
-					self.join_hbbft_epoch(honey_badger);
-				} else {
-					// TODO: Report consensus step errors
-					error!(target: "consensus", "Error on HoneyBadger consensus step");
-				}
-			})
-			.ok_or(EngineError::InvalidEngine)
+			.process_message(client.clone(), sender_id, message);
+
+		if let Some(step) = step {
+			self.process_step(client, step);
+			self.join_hbbft_epoch()?;
+		}
+		Ok(())
 	}
 
 	fn process_sealing_message(
@@ -373,10 +316,14 @@ impl HoneyBadgerBFT {
 		for m in messages {
 			let ser =
 				serde_json::to_vec(&m.message).expect("Serialization of consensus message failed");
-			let opt_net_info = self.network_info.read();
-			let net_info = opt_net_info
-				.as_ref()
-				.expect("Network Info expected to be initialized");
+			let net_info = {
+				let opt_net_info = self.hbbft_state.read();
+				opt_net_info
+					.network_info
+					.as_ref()
+					.expect("Network Info expected to be initialized")
+					.clone()
+			};
 			match m.target {
 				Target::Nodes(set) => {
 					trace!(target: "consensus", "Dispatching message {:?} to {:?}", m.message, set);
@@ -418,7 +365,7 @@ impl HoneyBadgerBFT {
 		}
 	}
 
-	fn process_step(&self, client: Arc<dyn EngineClient>, step: Step<Contribution, NodeId>) {
+	fn process_step(&self, client: Arc<dyn EngineClient>, step: HoneyBadgerStep) {
 		let mut message_counter = self.message_counter.write();
 		let messages = step.messages.into_iter().map(|msg| {
 			*message_counter += 1;
@@ -431,77 +378,27 @@ impl HoneyBadgerBFT {
 		self.process_output(client, step.output);
 	}
 
-	fn send_contribution(&self, client: Arc<dyn EngineClient>, honey_badger: &mut HoneyBadger) {
-		// TODO: Select a random *subset* of transactions to propose
-		let input_contribution = Contribution::new(
-			&client
-				.queued_transactions()
-				.iter()
-				.map(|txn| txn.signed().clone())
-				.collect(),
-		);
-		let mut rng = rand::thread_rng();
-		let step = honey_badger.propose(&input_contribution, &mut rng);
-
-		match step {
-			Ok(step) => {
-				self.process_step(client, step);
-			}
-			_ => {
-				// TODO: Report consensus step errors
-				error!(target: "consensus", "Error on HoneyBadger consensus step.");
-			}
-		}
-	}
-
 	/// Conditionally joins the current hbbft epoch if the number of received
 	/// contributions exceeds the maximum number of tolerated faulty nodes.
-	fn join_hbbft_epoch(&self, honey_badger: &mut HoneyBadger) {
-		// If we already sent our input we already joined the current epoch.
-		if honey_badger.has_input() {
-			return;
+	fn join_hbbft_epoch(&self) -> Result<(), EngineError> {
+		let client = self.client_arc().ok_or(EngineError::RequiresClient)?;
+		let step = self
+			.hbbft_state
+			.write()
+			.contribute_if_contribution_threshold_reached(client.clone());
+		if let Some(step) = step {
+			self.process_step(client, step)
 		}
-
-		if let Some(ref net_info) = *self.network_info.read() {
-			if honey_badger.received_proposals() > net_info.num_faulty() {
-				if let Some(ref weak) = *self.client.read() {
-					if let Some(client) = weak.upgrade() {
-						self.send_contribution(client, honey_badger);
-					} else {
-						panic!("The Client weak reference could not be upgraded.");
-					}
-				} else {
-					panic!("The Client is expected to be set.");
-				}
-			}
-		} else {
-			panic!("The Network Info expected to be set.");
-		}
-	}
-
-	fn skip_to_current_epoch(
-		&self,
-		client: &Arc<dyn EngineClient>,
-		honey_badger: &mut HoneyBadger,
-	) {
-		if let Some(parent_block_number) = client.block_number(BlockId::Latest) {
-			let next_block = parent_block_number + 1;
-			honey_badger.skip_to_epoch(next_block);
-			// We clear the random numbers of already imported blocks.
-			let mut random_numbers = self.random_numbers.write();
-			*random_numbers = random_numbers.split_off(&next_block);
-		} else {
-			error!(target: "consensus", "The current chain latest block number could not be obtained.");
-		}
+		Ok(())
 	}
 
 	fn start_hbbft_epoch(&self, client: Arc<dyn EngineClient>) {
-		// We silently return if the Honey Badger algorithm is not set, as it is expected in non-validator nodes.
-		if let Some(ref mut honey_badger) = *self.honey_badger.write() {
-			self.skip_to_current_epoch(&client, honey_badger);
-			if !honey_badger.has_input() {
-				self.send_contribution(client, honey_badger);
-			}
+		let step = self
+			.hbbft_state
+			.write()
+			.try_send_contribution(client.clone());
+		if let Some(step) = step {
+			self.process_step(client, step)
 		}
 	}
 
@@ -520,8 +417,13 @@ impl HoneyBadgerBFT {
 	}
 
 	fn new_sealing(&self) -> Sealing {
-		let ni_lock = self.network_info.read();
-		let netinfo = ni_lock.as_ref().cloned().expect("NetworkInfo not found");
+		let netinfo = self
+			.hbbft_state
+			.read()
+			.network_info
+			.as_ref()
+			.expect("NetworkInfo not found")
+			.clone();
 		Sealing::new(netinfo)
 	}
 
@@ -569,10 +471,12 @@ impl HoneyBadgerBFT {
 
 	fn check_for_epoch_change(&self) -> Option<()> {
 		let client = self.client_arc()?;
-		if *self.current_posdao_epoch.read() != get_posdao_epoch(&*client).ok()?.low_u64() {
-			if let None = self.try_init_honey_badger() {
-				info!(target: "engine", "Fatal: Updating Honey Badger instance failed!");
-			}
+		if let None = self
+			.hbbft_state
+			.write()
+			.update_honeybadger(client, &self.signer, false)
+		{
+			info!(target: "consensus", "Fatal: Updating Honey Badger instance failed!");
 		}
 		Some(())
 	}
@@ -599,8 +503,9 @@ impl Engine for HoneyBadgerBFT {
 		}
 		let RlpSig(sig) = rlp::decode(header.seal().first().ok_or(BlockError::InvalidSeal)?)?;
 		if self
-			.public_master_key
+			.hbbft_state
 			.read()
+			.public_master_key
 			.expect("Missing public master key")
 			.verify(&sig, header.bare_hash())
 		{
@@ -612,16 +517,28 @@ impl Engine for HoneyBadgerBFT {
 
 	fn register_client(&self, client: Weak<dyn EngineClient>) {
 		*self.client.write() = Some(client.clone());
-		if let None = self.try_init_honey_badger() {
-			// As long as the client is set we should be able to initialize as a regular node.
-			error!(target: "engine", "Error during HoneyBadger initialization!");
+		if let Some(client) = self.client_arc() {
+			if let None = self
+				.hbbft_state
+				.write()
+				.update_honeybadger(client, &self.signer, true)
+			{
+				// As long as the client is set we should be able to initialize as a regular node.
+				error!(target: "engine", "Error during HoneyBadger initialization!");
+			}
 		}
 	}
 
 	fn set_signer(&self, signer: Option<Box<dyn EngineSigner>>) {
 		*self.signer.write() = signer;
-		if let None = self.try_init_honey_badger() {
-			info!(target: "engine", "HoneyBadger Algorithm could not be created, Client possibly not set yet.");
+		if let Some(client) = self.client_arc() {
+			if let None = self
+				.hbbft_state
+				.write()
+				.update_honeybadger(client, &self.signer, true)
+			{
+				info!(target: "engine", "HoneyBadger Algorithm could not be created, Client possibly not set yet.");
+			}
 		}
 	}
 
@@ -709,8 +626,9 @@ impl Engine for HoneyBadgerBFT {
 			Some(sig) => sig,
 		};
 		if !self
-			.public_master_key
+			.hbbft_state
 			.read()
+			.public_master_key
 			.expect("Missing public master key")
 			.verify(sig, block.header.bare_hash())
 		{

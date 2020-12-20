@@ -4,7 +4,7 @@ use rlp::Encodable;
 use std::time::UNIX_EPOCH;
 
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
-pub(super) struct Contribution {
+pub(crate) struct Contribution {
 	pub transactions: Vec<Vec<u8>>,
 	pub timestamp: u64,
 	/// Random data for on-chain randomness.
