@@ -1,4 +1,4 @@
-use crate::contracts::validator_set::get_validator_pubkeys;
+use crate::contracts::validator_set::{get_validator_pubkeys, ValidatorType};
 use crate::NodeId;
 use client_traits::{EngineClient, TransactionRequest};
 use common_types::ids::BlockId;
@@ -194,8 +194,9 @@ pub fn initialize_synckeygen(
 	client: &dyn EngineClient,
 	signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 	block_id: BlockId,
+	validator_type: ValidatorType,
 ) -> Result<SyncKeyGen<Public, PublicWrapper>, CallError> {
-	let vmap = get_validator_pubkeys(&*client, block_id)?;
+	let vmap = get_validator_pubkeys(&*client, block_id, validator_type)?;
 	let pub_keys: BTreeMap<_, _> = vmap
 		.values()
 		.map(|p| (*p, PublicWrapper { inner: p.clone() }))
@@ -228,7 +229,7 @@ pub fn send_keygen_transactions(
 		None => return Err(CallError::ReturnValueInvalid),
 	};
 
-	let vmap = get_validator_pubkeys(&*client, BlockId::Latest)?;
+	let vmap = get_validator_pubkeys(&*client, BlockId::Latest, ValidatorType::Pending)?;
 	let pub_keys: BTreeMap<_, _> = vmap
 		.values()
 		.map(|p| (*p, PublicWrapper { inner: p.clone() }))

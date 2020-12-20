@@ -29,7 +29,9 @@ use serde::Deserialize;
 use serde_json;
 
 use crate::contracts::keygen_history::{initialize_synckeygen, send_keygen_transactions};
-use crate::contracts::validator_set::{get_pending_validators, is_pending_validator};
+use crate::contracts::validator_set::{
+	get_pending_validators, is_pending_validator, ValidatorType,
+};
 use crate::contribution::{unix_now_millis, unix_now_secs};
 use crate::hbbft_state::{Batch, HbMessage, HbbftState, HoneyBadgerStep};
 use crate::sealing::{self, RlpSig, Sealing};
@@ -448,9 +450,12 @@ impl HoneyBadgerBFT {
 				}
 
 				// Check if a new key is ready to be generated, return true to switch to the new epoch in that case.
-				if let Ok(synckeygen) =
-					initialize_synckeygen(&*client, &self.signer, BlockId::Latest)
-				{
+				if let Ok(synckeygen) = initialize_synckeygen(
+					&*client,
+					&self.signer,
+					BlockId::Latest,
+					ValidatorType::Pending,
+				) {
 					if synckeygen.is_ready() {
 						return true;
 					}
@@ -496,8 +501,32 @@ impl Engine for HoneyBadgerBFT {
 		Ok(())
 	}
 
-	fn verify_block_basic(&self, header: &Header) -> Result<(), Error> {
+	/// Phase 1 Checks
+	fn verify_block_basic(&self, _header: &Header) -> Result<(), Error> {
+		Ok(())
+	}
+
+	/// Pase 2 Checks
+	fn verify_block_unordered(&self, _header: &Header) -> Result<(), Error> {
+		Ok(())
+	}
+
+	/// Phase 3 Checks
+	/// We check the signature here since at this point the blocks are imported in-order.
+	/// To verify the signature we need the parent block already imported on the chain.
+	fn verify_block_family(&self, header: &Header, _parent: &Header) -> Result<(), Error> {
 		self.check_for_epoch_change();
+
+		let latest_block_nr = match self.client_arc() {
+			Some(client) => client.block_number(BlockId::Latest).expect("must succeed"),
+			None => 0,
+		};
+
+		if header.number() > (latest_block_nr + 1) {
+			error!(target: "engine", "Phase 3 block verification out of order!");
+			return Err(BlockError::InvalidSeal.into());
+		}
+
 		if header.seal().len() != 1 {
 			return Err(BlockError::InvalidSeal.into());
 		}
@@ -513,6 +542,11 @@ impl Engine for HoneyBadgerBFT {
 		} else {
 			Err(BlockError::InvalidSeal.into())
 		}
+	}
+
+	// Phase 4
+	fn verify_block_external(&self, _header: &Header) -> Result<(), Error> {
+		Ok(())
 	}
 
 	fn register_client(&self, client: Weak<dyn EngineClient>) {

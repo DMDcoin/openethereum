@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use crate::contracts::keygen_history::{initialize_synckeygen, synckeygen_to_network_info};
 use crate::contracts::staking::{get_posdao_epoch, get_posdao_epoch_start};
+use crate::contracts::validator_set::ValidatorType;
 use crate::contribution::Contribution;
 use crate::NodeId;
 
@@ -57,6 +58,7 @@ impl HbbftState {
 			&*client,
 			signer,
 			BlockId::Number(posdao_epoch_start.low_u64()),
+			ValidatorType::Current,
 		)
 		.ok()?;
 		assert!(synckeygen.is_ready());
