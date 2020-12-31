@@ -1,4 +1,5 @@
-use crate::contracts::validator_set::get_validator_pubkeys;
+use crate::contracts::staking::get_posdao_epoch;
+use crate::contracts::validator_set::{get_validator_pubkeys, ValidatorType};
 use crate::NodeId;
 use client_traits::{EngineClient, TransactionRequest};
 use common_types::ids::BlockId;
@@ -194,8 +195,9 @@ pub fn initialize_synckeygen(
 	client: &dyn EngineClient,
 	signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 	block_id: BlockId,
+	validator_type: ValidatorType,
 ) -> Result<SyncKeyGen<Public, PublicWrapper>, CallError> {
-	let vmap = get_validator_pubkeys(&*client, block_id)?;
+	let vmap = get_validator_pubkeys(&*client, block_id, validator_type)?;
 	let pub_keys: BTreeMap<_, _> = vmap
 		.values()
 		.map(|p| (*p, PublicWrapper { inner: p.clone() }))
@@ -228,7 +230,7 @@ pub fn send_keygen_transactions(
 		None => return Err(CallError::ReturnValueInvalid),
 	};
 
-	let vmap = get_validator_pubkeys(&*client, BlockId::Latest)?;
+	let vmap = get_validator_pubkeys(&*client, BlockId::Latest, ValidatorType::Pending)?;
 	let pub_keys: BTreeMap<_, _> = vmap
 		.values()
 		.map(|p| (*p, PublicWrapper { inner: p.clone() }))
@@ -248,13 +250,16 @@ pub fn send_keygen_transactions(
 	// let us send our part
 	let full_client = client.as_full_client().ok_or(CallError::NotFullClient)?;
 
+	let upcoming_epoch = get_posdao_epoch(client)? + 1;
+
 	// Check if we already sent our part.
 	if !has_part_of_address_data(client, address)? {
 		let serialized_part = match bincode::serialize(&part_data) {
 			Ok(part) => part,
 			Err(_) => return Err(CallError::ReturnValueInvalid),
 		};
-		let write_part_data = key_history_contract::functions::write_part::call(serialized_part);
+		let write_part_data =
+			key_history_contract::functions::write_part::call(upcoming_epoch, serialized_part);
 
 		let part_transaction = TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_part_data.0)
 			.gas(U256::from(900_000))
@@ -285,7 +290,8 @@ pub fn send_keygen_transactions(
 				Err(_) => return Err(CallError::ReturnValueInvalid),
 			})
 		}
-		let write_acks_data = key_history_contract::functions::write_acks::call(serialized_acks);
+		let write_acks_data =
+			key_history_contract::functions::write_acks::call(upcoming_epoch, serialized_acks);
 
 		let acks_transaction = TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_acks_data.0)
 			.gas(U256::from(900_000))

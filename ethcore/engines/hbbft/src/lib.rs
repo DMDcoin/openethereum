@@ -42,6 +42,7 @@ mod block_reward_hbbft;
 mod contracts;
 mod contribution;
 mod hbbft_engine;
+mod hbbft_state;
 mod sealing;
 mod utils;
 
@@ -87,7 +88,7 @@ mod tests {
 
 	lazy_static! {
 		static ref MASTER_OF_CEREMONIES_KEYPAIR: KeyPair = KeyPair::from_secret(
-			Secret::from_str("cbce3ff80ac85dacb8c3d730705a97fcaba1c0dbd4216f8fe824c0baaa164467")
+			Secret::from_str("18f059a4d72d166a96c1edfb9803af258a07b5ec862a961b3a1d801f443a1762")
 				.expect("Secret from hex string must succeed")
 		)
 		.expect("KeyPair generation from secret must succeed");

@@ -19,12 +19,21 @@ macro_rules! call_const_validator {
 	};
 }
 
+pub enum ValidatorType {
+	Current,
+	Pending,
+}
+
 pub fn get_validator_pubkeys(
 	client: &dyn EngineClient,
 	block_id: BlockId,
+	validator_type: ValidatorType,
 ) -> Result<BTreeMap<Address, Public>, CallError> {
 	let c = BoundContract::bind(client, block_id, *VALIDATOR_SET_ADDRESS);
-	let validators = call_const_validator!(c, get_validators)?;
+	let validators = match validator_type {
+		ValidatorType::Current => call_const_validator!(c, get_validators)?,
+		ValidatorType::Pending => call_const_validator!(c, get_pending_validators)?,
+	};
 	let mut validator_map = BTreeMap::new();
 	for v in validators {
 		let pubkey = call_const_validator!(c, get_public_key, v)?;
