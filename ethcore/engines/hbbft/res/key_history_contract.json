@@ -75,6 +75,27 @@
     "type": "function"
   },
   {
+    "constant": true,
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_val",
+        "type": "address"
+      }
+    ],
+    "name": "getPart",
+    "outputs": [
+      {
+        "internalType": "bytes",
+        "name": "",
+        "type": "bytes"
+      }
+    ],
+    "payable": false,
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "constant": false,
     "inputs": [
       {
@@ -180,6 +201,11 @@
     "constant": false,
     "inputs": [
       {
+        "internalType": "uint256",
+        "name": "_upcommingEpoch",
+        "type": "uint256"
+      },
+      {
         "internalType": "bytes[]",
         "name": "_acks",
         "type": "bytes[]"
@@ -194,6 +220,11 @@
   {
     "constant": false,
     "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_upcommingEpoch",
+        "type": "uint256"
+      },
       {
         "internalType": "bytes",
         "name": "_part",

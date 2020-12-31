@@ -103,7 +103,7 @@ pub fn create_hbbft_client(keypair: KeyPair) -> HbbftTestClient {
 		notify,
 		miner,
 		keypair,
-		nonce: U256::from(1048576),
+		nonce: U256::from(0),
 	}
 }
 
