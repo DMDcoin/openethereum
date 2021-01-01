@@ -362,12 +362,15 @@ fn execute_light_impl<Cr>(cmd: RunCmd, logger: Arc<RotatingLogger>, on_client_rq
 	})
 }
 
-struct SyncProviderWrapper(Arc<dyn SyncProvider>);
+struct SyncProviderWrapper(Weak<dyn SyncProvider>);
 
 impl ChainSyncing for SyncProviderWrapper {
 	/// are we in the middle of a major sync?
 	fn is_major_syncing(&self) -> bool {
-		self.0.is_major_syncing()
+		match self.0.upgrade() {
+			Some(arc) => arc.is_major_syncing(),
+			None => false,
+		}
 	}
 }
 
@@ -676,7 +679,7 @@ fn execute_impl<Cr, Rr>(
 
 	service.add_notify(chain_notify.clone());
 
-	client.set_sync_provider(Box::new(SyncProviderWrapper(sync_provider.clone())));
+	client.set_sync_provider(Box::new(SyncProviderWrapper(Arc::downgrade(&sync_provider))));
 
 	// Propagate transactions as soon as they are imported.
 	let tx = ::parking_lot::Mutex::new(priority_tasks);
