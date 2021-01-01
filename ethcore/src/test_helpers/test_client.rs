@@ -936,6 +936,10 @@ impl BlockChainClient for TestBlockChainClient {
 		let signed = self.create_transaction(tx_request)?;
 		self.miner.import_own_transaction(self, signed.into(), true)
 	}
+
+	fn is_major_syncing(&self) -> bool {
+		false
+	}
 }
 
 impl IoClient for TestBlockChainClient {

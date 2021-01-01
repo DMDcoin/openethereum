@@ -2226,6 +2226,13 @@ impl BlockChainClient for Client {
 		let signed = self.create_transaction(tx_request)?;
 		self.importer.miner.import_own_transaction(self, signed.into(), true)
 	}
+
+	fn is_major_syncing(&self) -> bool {
+		match &*self.sync_provider.lock() {
+			Some(sync_provider) => sync_provider.is_major_syncing(),
+			None => false,
+		}
+	}
 }
 
 impl IoClient for Client {

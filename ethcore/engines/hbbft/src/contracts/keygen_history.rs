@@ -230,6 +230,13 @@ pub fn send_keygen_transactions(
 		None => return Err(CallError::ReturnValueInvalid),
 	};
 
+	let full_client = client.as_full_client().ok_or(CallError::NotFullClient)?;
+
+	// If the chain is still syncing, do not send Parts or Acks.
+	if full_client.is_major_syncing() {
+		return Ok(());
+	}
+
 	let vmap = get_validator_pubkeys(&*client, BlockId::Latest, ValidatorType::Pending)?;
 	let pub_keys: BTreeMap<_, _> = vmap
 		.values()
@@ -246,9 +253,6 @@ pub fn send_keygen_transactions(
 		Some(part) => part,
 		None => return Err(CallError::ReturnValueInvalid),
 	};
-
-	// let us send our part
-	let full_client = client.as_full_client().ok_or(CallError::NotFullClient)?;
 
 	let upcoming_epoch = get_posdao_epoch(client)? + 1;
 
