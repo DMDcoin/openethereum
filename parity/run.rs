@@ -21,7 +21,7 @@ use std::thread;
 
 use ansi_term::Colour;
 use client_traits::{BlockInfo, BlockChainClient};
-use ethcore::client::{Client, DatabaseCompactionProfile};
+use ethcore::client::{ChainSyncing, Client, DatabaseCompactionProfile};
 use ethcore::miner::{self, stratum, Miner, MinerService, MinerOptions};
 use snapshot::{self, SnapshotConfiguration};
 use spec::SpecParams;
@@ -37,7 +37,7 @@ use miner::external::ExternalMiner;
 use miner::work_notify::WorkPoster;
 use node_filter::NodeFilter;
 use parity_runtime::Runtime;
-use sync::{self, SyncConfig, PrivateTxHandler};
+use sync::{self, SyncConfig, PrivateTxHandler, SyncProvider};
 use types::{
 	client_types::Mode,
 	engines::OptimizeFor,
@@ -362,6 +362,15 @@ fn execute_light_impl<Cr>(cmd: RunCmd, logger: Arc<RotatingLogger>, on_client_rq
 	})
 }
 
+struct SyncProviderWrapper(Arc<dyn SyncProvider>);
+
+impl ChainSyncing for SyncProviderWrapper {
+	/// are we in the middle of a major sync?
+	fn is_major_syncing(&self) -> bool {
+		self.0.is_major_syncing()
+	}
+}
+
 fn execute_impl<Cr, Rr>(
 	cmd: RunCmd,
 	logger: Arc<RotatingLogger>,
@@ -666,6 +675,8 @@ fn execute_impl<Cr, Rr>(
 	).map_err(|e| format!("Sync error: {}", e))?;
 
 	service.add_notify(chain_notify.clone());
+
+	client.set_sync_provider(Box::new(SyncProviderWrapper(sync_provider.clone())));
 
 	// Propagate transactions as soon as they are imported.
 	let tx = ::parking_lot::Mutex::new(priority_tasks);

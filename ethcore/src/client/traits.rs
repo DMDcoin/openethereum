@@ -51,6 +51,12 @@ pub trait EngineInfo {
 	fn engine(&self) -> &dyn Engine;
 }
 
+/// Provides information about the chain sync state.
+pub trait ChainSyncing: Send + Sync {
+	/// are we in the middle of a major sync?
+	fn is_major_syncing(&self) -> bool;
+}
+
 /// Provides `reopen_block` method
 pub trait ReopenBlock {
 	/// Reopens an OpenBlock and updates uncles.

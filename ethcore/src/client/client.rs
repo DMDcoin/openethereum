@@ -57,6 +57,7 @@ use client::{
 	ReopenBlock, SealedBlockImporter,
 };
 use client::ancient_import::AncientVerifier;
+use client::traits::ChainSyncing;
 use client_traits::{
 	AccountData,
 	BadBlocks,
@@ -247,6 +248,9 @@ pub struct Client {
 
 	/// A closure to call when we want to restart the client
 	exit_handler: Mutex<Option<Box<dyn Fn(String) + 'static + Send>>>,
+
+	/// Accessor to query chain syncing state.
+	sync_provider: Mutex<Option<Box<dyn ChainSyncing>>>,
 
 	importer: Importer,
 }
@@ -805,6 +809,7 @@ impl Client {
 			on_user_defaults_change: Mutex::new(None),
 			registrar_address,
 			exit_handler: Mutex::new(None),
+			sync_provider: Mutex::new(None),
 			importer,
 			config,
 		});
@@ -869,6 +874,11 @@ impl Client {
 	/// the restart.
 	pub fn set_exit_handler<F>(&self, f: F) where F: Fn(String) + 'static + Send {
 		*self.exit_handler.lock() = Some(Box::new(f));
+	}
+
+	/// Sets sync provider trait object to access chain sync state from the client/engine.
+	pub fn set_sync_provider(&self, sync_provider: Box<dyn ChainSyncing>) {
+		*self.sync_provider.lock() = Some(sync_provider);
 	}
 
 	/// Returns engine reference.
