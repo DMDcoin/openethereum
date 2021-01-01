@@ -266,7 +266,7 @@ pub fn send_keygen_transactions(
 			key_history_contract::functions::write_part::call(upcoming_epoch, serialized_part);
 
 		let part_transaction = TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_part_data.0)
-			.gas(U256::from(900_000))
+			.gas(U256::from(7_000_000))
 			.nonce(full_client.latest_nonce(&address))
 			.gas_price(U256::from(10000000000u64));
 		full_client
@@ -298,7 +298,7 @@ pub fn send_keygen_transactions(
 			key_history_contract::functions::write_acks::call(upcoming_epoch, serialized_acks);
 
 		let acks_transaction = TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_acks_data.0)
-			.gas(U256::from(900_000))
+			.gas(U256::from(7_000_000))
 			.nonce(full_client.latest_nonce(&address))
 			.gas_price(U256::from(10000000000u64));
 		full_client
