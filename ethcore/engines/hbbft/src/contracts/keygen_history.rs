@@ -99,7 +99,7 @@ pub fn part_of_address(
 ) -> Result<Option<Ack>, CallError> {
 	let c = BoundContract::bind(client, block_id, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_part = call_const_key_history!(c, parts, address)?;
-	println!("Part for address {}: {:?}", address, serialized_part);
+	//println!("Part for address {}: {:?}", address, serialized_part);
 	if serialized_part.is_empty() {
 		return Err(CallError::ReturnValueInvalid);
 	}
@@ -134,13 +134,13 @@ pub fn acks_of_address(
 	let c = BoundContract::bind(client, block_id, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_length = call_const_key_history!(c, get_acks_length, address)?;
 
-	println!(
-		"Acks for address {} is of size: {:?}",
-		address, serialized_length
-	);
+	// println!(
+	// 	"Acks for address {} is of size: {:?}",
+	// 	address, serialized_length
+	// );
 	for n in 0..serialized_length.low_u64() {
 		let serialized_ack = call_const_key_history!(c, acks, address, n)?;
-		println!("Ack #{} for address {}: {:?}", n, address, serialized_ack);
+		//println!("Ack #{} for address {}: {:?}", n, address, serialized_ack);
 		if serialized_ack.is_empty() {
 			return Err(CallError::ReturnValueInvalid);
 		}
@@ -254,7 +254,7 @@ pub fn send_keygen_transactions(
 		None => return Err(CallError::ReturnValueInvalid),
 	};
 
-	let upcoming_epoch = get_posdao_epoch(client)? + 1;
+	let upcoming_epoch = get_posdao_epoch(client, BlockId::Latest)? + 1;
 
 	// Check if we already sent our part.
 	if !has_part_of_address_data(client, address)? {

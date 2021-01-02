@@ -3,7 +3,7 @@ use common_types::ids::BlockId;
 use engine::signer::EngineSigner;
 use hbbft::crypto::PublicKey;
 use hbbft::honey_badger::{self, HoneyBadgerBuilder};
-use hbbft::NetworkInfo;
+use hbbft::{Epoched, NetworkInfo};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -47,7 +47,10 @@ impl HbbftState {
 		signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 		force: bool,
 	) -> Option<()> {
-		if !force && self.current_posdao_epoch == get_posdao_epoch(&*client).ok()?.low_u64() {
+		if !force
+			&& self.current_posdao_epoch
+				== get_posdao_epoch(&*client, BlockId::Latest).ok()?.low_u64()
+		{
 			// hbbft state is already up to date.
 			// @todo Return proper error codes.
 			return Some(());
@@ -69,9 +72,10 @@ impl HbbftState {
 		self.network_info = None;
 		self.honey_badger = None;
 		// Set the current POSDAO epoch #
-		self.current_posdao_epoch = get_posdao_epoch(&*client).ok()?.low_u64();
+		self.current_posdao_epoch = get_posdao_epoch(&*client, BlockId::Latest).ok()?.low_u64();
+		trace!(target: "engine", "Switched hbbft state to epoch {}.", self.current_posdao_epoch);
 		if sks.is_none() {
-			info!(target: "engine", "We are not part of the HoneyBadger validator set - running as regular node.");
+			trace!(target: "engine", "We are not part of the HoneyBadger validator set - running as regular node.");
 			return Some(());
 		}
 
@@ -79,13 +83,16 @@ impl HbbftState {
 		self.network_info = Some(network_info.clone());
 		self.honey_badger = Some(self.new_honey_badger(network_info)?);
 
-		info!(target: "engine", "HoneyBadger Algorithm initialized! Running as validator node.");
+		trace!(target: "engine", "HoneyBadger Algorithm initialized! Running as validator node.");
 		Some(())
 	}
 
 	fn skip_to_current_epoch(client: &Arc<dyn EngineClient>, honey_badger: &mut HoneyBadger) {
 		if let Some(parent_block_number) = client.block_number(BlockId::Latest) {
 			let next_block = parent_block_number + 1;
+			if next_block != honey_badger.epoch() {
+				trace!(target: "consensus", "Skipping honey_badger forward to epoch(block) {}, was at epoch(block) {}.", next_block, honey_badger.epoch());
+			}
 			honey_badger.skip_to_epoch(next_block);
 		} else {
 			error!(target: "consensus", "The current chain latest block number could not be obtained.");
@@ -139,6 +146,20 @@ impl HbbftState {
 		if honey_badger.has_input() {
 			return None;
 		}
+
+		// If the parent block of the block we would contribute to is not in the hbbft state's
+		// epoch we cannot start to contribute, since we would write into a hbbft instance
+		// which will be destroyed.
+		let posdao_epoch = get_posdao_epoch(&*client, BlockId::Number(honey_badger.epoch() - 1))
+			.ok()?
+			.low_u64();
+		if self.current_posdao_epoch != posdao_epoch {
+			trace!(target: "consensus", "hbbft_state epoch mismatch: hbbft_state epoch is {}, honey badger instance epoch is: {}.", 
+				   self.current_posdao_epoch, posdao_epoch);
+			return None;
+		}
+
+		trace!(target: "consensus", "Writing contribution for hbbft epoch(block) {}.", honey_badger.epoch());
 
 		// Now we can select the transactions to include in our contribution.
 		// TODO: Select a random *subset* of transactions to propose
