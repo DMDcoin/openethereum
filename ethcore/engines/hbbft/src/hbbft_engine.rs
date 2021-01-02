@@ -32,6 +32,7 @@ use crate::contracts::keygen_history::{initialize_synckeygen, send_keygen_transa
 use crate::contracts::validator_set::{
 	get_pending_validators, is_pending_validator, ValidatorType,
 };
+use crate::contracts::staking::start_time_of_next_phase_transition;
 use crate::contribution::{unix_now_millis, unix_now_secs};
 use crate::hbbft_state::{Batch, HbMessage, HbbftState, HoneyBadgerStep};
 use crate::sealing::{self, RlpSig, Sealing};
@@ -125,6 +126,15 @@ impl IoHandler<()> for TransitionHandler {
 					c.update_sealing(ForceUpdateSealing::No);
 				}
 			}
+
+			// Send Keygen transactions if necessary.
+			// Do this *before* calling on_transactions_imported to avoid starting
+			// a new block without giving it a chance to include Keygen transactions.
+			//self.engine.do_keygen();
+
+			// @todo Trigger block creation when we are not in the keygen phase yet,
+			//       but should be according to the epoch length settings.
+			self.engine.start_hbbft_epoch_if_next_phase();
 
 			// Transactions may have been submitted during creation of the last block, trigger the
 			// creation of a new block if the transaction threshold has been reached.
@@ -442,6 +452,26 @@ impl HoneyBadgerBFT {
 		self.client.read().as_ref().and_then(Weak::upgrade)
 	}
 
+
+	fn start_hbbft_epoch_if_next_phase(&self) {
+		match self.client_arc() {
+			None => return,
+			Some(client) => {
+				// Get the next phase start time
+				let genesis_transition_time = match start_time_of_next_phase_transition(&*client) {
+					Ok(time) => time,
+					Err(_) => return,
+				};
+
+				// If current time larger than phase start time, start a new block.
+				if genesis_transition_time.as_u64() < unix_now_secs() {
+					self.start_hbbft_epoch(client);
+				}
+			}
+		}
+	}
+
+
 	/// Returns true if we are in the keygen phase and a new key has been generated.
 	fn do_keygen(&self) -> bool {
 		match self.client_arc() {
@@ -471,6 +501,9 @@ impl HoneyBadgerBFT {
 				}
 
 				// Otherwise check if we are in the pending validator set and send Parts and Acks transactions.
+				// @todo send_keygen_transactions initializes another synckeygen structure, a potentially
+				//       time consuming process. Move sending of keygen transactions into a separate function
+				//       and call it periodically using timer events instead of on close block.
 				if let Some(signer) = self.signer.read().as_ref() {
 					if let Ok(is_pending) = is_pending_validator(&*client, &signer.address()) {
 						if is_pending {
