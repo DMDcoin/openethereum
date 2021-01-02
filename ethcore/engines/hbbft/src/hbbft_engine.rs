@@ -117,7 +117,7 @@ impl IoHandler<()> for TransitionHandler {
 
 	fn timeout(&self, io: &IoContext<()>, timer: TimerToken) {
 		if timer == ENGINE_TIMEOUT_TOKEN {
-			trace!(target: "consensus", "Honey Badger IoHandler timeout called");
+			//trace!(target: "consensus", "Honey Badger IoHandler timeout called");
 			// The block may be complete, but not have been ready to seal - trigger a new seal attempt.
 			// TODO: In theory, that should not happen. The seal is ready exactly when the sealing entry is `Complete`.
 			if let Some(ref weak) = *self.client.read() {
@@ -190,6 +190,8 @@ impl HoneyBadgerBFT {
 			None => return,
 			Some(batch) => batch,
 		};
+
+		trace!(target: "consensus", "Batch received for epoch {}, creating new Block.", batch.epoch);
 
 		// Decode and de-duplicate transactions
 		let batch_txns: Vec<_> = batch
@@ -384,6 +386,9 @@ impl HoneyBadgerBFT {
 	/// contributions exceeds the maximum number of tolerated faulty nodes.
 	fn join_hbbft_epoch(&self) -> Result<(), EngineError> {
 		let client = self.client_arc().ok_or(EngineError::RequiresClient)?;
+		if self.is_syncing(&client) {
+			return Ok(());
+		}
 		let step = self
 			.hbbft_state
 			.write()
@@ -395,6 +400,9 @@ impl HoneyBadgerBFT {
 	}
 
 	fn start_hbbft_epoch(&self, client: Arc<dyn EngineClient>) {
+		if self.is_syncing(&client) {
+			return;
+		}
 		let step = self
 			.hbbft_state
 			.write()
@@ -485,6 +493,14 @@ impl HoneyBadgerBFT {
 			info!(target: "consensus", "Fatal: Updating Honey Badger instance failed!");
 		}
 		Some(())
+	}
+
+	fn is_syncing(&self, client: &Arc<dyn EngineClient>) -> bool {
+		match client.as_full_client() {
+			Some(full_client) => full_client.is_major_syncing(),
+			// We only support full clients at this point.
+			None => true,
+		}
 	}
 }
 

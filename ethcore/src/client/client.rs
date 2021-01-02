@@ -2230,7 +2230,9 @@ impl BlockChainClient for Client {
 	fn is_major_syncing(&self) -> bool {
 		match &*self.sync_provider.lock() {
 			Some(sync_provider) => sync_provider.is_major_syncing(),
-			None => false,
+			// We also indicate the "syncing" state when the SyncProvider has not been set,
+			// which usually only happens when the client is not fully configured yet.
+			None => true,
 		}
 	}
 }

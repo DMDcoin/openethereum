@@ -369,7 +369,8 @@ impl ChainSyncing for SyncProviderWrapper {
 	fn is_major_syncing(&self) -> bool {
 		match self.0.upgrade() {
 			Some(arc) => arc.is_major_syncing(),
-			None => false,
+			// We also indicate the "syncing" state when the SyncProvider has already been destroyed.
+			None => true,
 		}
 	}
 }
@@ -679,8 +680,6 @@ fn execute_impl<Cr, Rr>(
 
 	service.add_notify(chain_notify.clone());
 
-	client.set_sync_provider(Box::new(SyncProviderWrapper(Arc::downgrade(&sync_provider))));
-
 	// Propagate transactions as soon as they are imported.
 	let tx = ::parking_lot::Mutex::new(priority_tasks);
 	let is_ready = Arc::new(atomic::AtomicBool::new(true));
@@ -833,6 +832,12 @@ fn execute_impl<Cr, Rr>(
 
 	client.set_exit_handler(on_client_rq);
 	updater.set_exit_handler(on_updater_rq);
+
+	// Registering the sync provider as late as possible to use it as indicator that
+	// client startup has finished.
+	// This is essential to assure no block creation attempt happens before the client
+	// is fully configured.
+	client.set_sync_provider(Box::new(SyncProviderWrapper(Arc::downgrade(&sync_provider))));
 
 	Ok(RunningClient {
 		inner: RunningClientInner::Full {
