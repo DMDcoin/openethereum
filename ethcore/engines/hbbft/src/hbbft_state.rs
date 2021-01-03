@@ -5,6 +5,7 @@ use hbbft::crypto::PublicKey;
 use hbbft::honey_badger::{self, HoneyBadgerBuilder};
 use hbbft::{Epoched, NetworkInfo};
 use parking_lot::RwLock;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::contracts::keygen_history::{initialize_synckeygen, synckeygen_to_network_info};
@@ -17,12 +18,14 @@ pub type HbMessage = honey_badger::Message<NodeId>;
 pub(crate) type HoneyBadger = honey_badger::HoneyBadger<Contribution, NodeId>;
 pub(crate) type Batch = honey_badger::Batch<Contribution, NodeId>;
 pub(crate) type HoneyBadgerStep = honey_badger::Step<Contribution, NodeId>;
+pub(crate) type HoneyBadgerResult = honey_badger::Result<HoneyBadgerStep>;
 
 pub(crate) struct HbbftState {
 	pub network_info: Option<NetworkInfo<NodeId>>,
 	pub honey_badger: Option<HoneyBadger>,
 	pub public_master_key: Option<PublicKey>,
 	pub current_posdao_epoch: u64,
+	future_messages_cache: BTreeMap<u64, Vec<(NodeId, HbMessage)>>,
 }
 
 impl HbbftState {
@@ -32,6 +35,7 @@ impl HbbftState {
 			honey_badger: None,
 			public_master_key: None,
 			current_posdao_epoch: 0,
+			future_messages_cache: BTreeMap::new(),
 		}
 	}
 
@@ -86,6 +90,28 @@ impl HbbftState {
 		Some(())
 	}
 
+	// Call periodically to assure cached messages will eventually be delivered.
+	pub fn replay_cached_messages(&mut self) -> Option<Vec<HoneyBadgerResult>> {
+		let honey_badger = self.honey_badger.as_mut()?;
+
+		let messages = self.future_messages_cache.get(&honey_badger.epoch())?;
+
+		let all_steps: Vec<_> = messages
+			.iter()
+			.map(|m| {
+				trace!(target: "engine", "Replaying cached consensus message {:?} from {}", m.1, m.0);
+				honey_badger.handle_message(&m.0, m.1.clone())
+			})
+			.collect();
+
+		// Delete current epoch and all previous messages
+		self.future_messages_cache = self
+			.future_messages_cache
+			.split_off(&(honey_badger.epoch() + 1));
+
+		Some(all_steps)
+	}
+
 	fn skip_to_current_epoch(
 		&mut self,
 		client: Arc<dyn EngineClient>,
@@ -111,6 +137,7 @@ impl HbbftState {
 			trace!(target: "consensus", "Skipping honey_badger forward to epoch(block) {}, was at epoch(block) {}.", next_block, honey_badger.epoch());
 		}
 		honey_badger.skip_to_epoch(next_block);
+
 		Some(())
 	}
 
@@ -130,8 +157,12 @@ impl HbbftState {
 		// instance is the correct one to use. Tt may change if the the POSDAO epoch changes, causing
 		// consensus messages to get lost.
 		if message.epoch() > honey_badger.epoch() {
-			error!(target: "consensus", "The current chain latest block number could not be obtained.");
-			panic!("Caching of future epochs not implemented yet!");
+			error!(target: "consensus", "Message from future epoch, caching it for handling it in when the epoch is current.");
+			self.future_messages_cache
+				.entry(message.epoch())
+				.or_default()
+				.push((sender_id, message));
+			return None;
 		}
 
 		if let Ok(step) = honey_badger.handle_message(&sender_id, message) {

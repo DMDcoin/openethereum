@@ -140,6 +140,9 @@ impl IoHandler<()> for TransitionHandler {
 			// creation of a new block if the transaction threshold has been reached.
 			self.engine.on_transactions_imported();
 
+			// Periodically allow messages received for future epochs to be processed.
+			self.engine.replay_cached_messages();
+
 			// The client may not be registered yet on startup, we set the default duration.
 			let mut timer_duration = DEFAULT_DURATION;
 			if let Some(ref weak) = *self.client.read() {
@@ -470,6 +473,32 @@ impl HoneyBadgerBFT {
 				}
 			}
 		}
+	}
+
+	fn replay_cached_messages(&self) -> Option<()> {
+		let client = self.client_arc()?;
+		let steps = self.hbbft_state.write().replay_cached_messages();
+		let mut processed_step = false;
+		if let Some(steps) = steps {
+			for step in steps {
+				match step {
+					Ok(step) => {
+						trace!(target: "engine", "Processing cached message step");
+						processed_step = true;
+						self.process_step(client.clone(), step)
+					}
+					Err(e) => error!(target: "engine", "Error handling replayed message: {}", e),
+				}
+			}
+		}
+
+		if processed_step {
+			if let Err(e) = self.join_hbbft_epoch() {
+				error!(target: "engine", "Error trying to join epoch: {}", e);
+			}
+		}
+
+		Some(())
 	}
 
 	/// Returns true if we are in the keygen phase and a new key has been generated.

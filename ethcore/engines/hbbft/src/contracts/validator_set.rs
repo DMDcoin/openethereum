@@ -43,7 +43,7 @@ pub fn get_validator_pubkeys(
 		}
 		let pubkey = Public::from_slice(&pubkey);
 
-		println!("Validator {:?} with public key {}", v, pubkey);
+		//println!("Validator {:?} with public key {}", v, pubkey);
 		validator_map.insert(v, pubkey);
 	}
 	Ok(validator_map)
