@@ -45,18 +45,17 @@ impl HbbftState {
 		&mut self,
 		client: Arc<dyn EngineClient>,
 		signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
+		block_id: BlockId,
 		force: bool,
 	) -> Option<()> {
-		if !force
-			&& self.current_posdao_epoch
-				== get_posdao_epoch(&*client, BlockId::Latest).ok()?.low_u64()
-		{
+		let target_posdao_epoch = get_posdao_epoch(&*client, block_id).ok()?.low_u64();
+		if !force && self.current_posdao_epoch == target_posdao_epoch {
 			// hbbft state is already up to date.
 			// @todo Return proper error codes.
 			return Some(());
 		}
 
-		let posdao_epoch_start = get_posdao_epoch_start(&*client).ok()?;
+		let posdao_epoch_start = get_posdao_epoch_start(&*client, block_id).ok()?;
 		let synckeygen = initialize_synckeygen(
 			&*client,
 			signer,
@@ -72,7 +71,7 @@ impl HbbftState {
 		self.network_info = None;
 		self.honey_badger = None;
 		// Set the current POSDAO epoch #
-		self.current_posdao_epoch = get_posdao_epoch(&*client, BlockId::Latest).ok()?.low_u64();
+		self.current_posdao_epoch = target_posdao_epoch;
 		trace!(target: "engine", "Switched hbbft state to epoch {}.", self.current_posdao_epoch);
 		if sks.is_none() {
 			trace!(target: "engine", "We are not part of the HoneyBadger validator set - running as regular node.");
@@ -87,27 +86,43 @@ impl HbbftState {
 		Some(())
 	}
 
-	fn skip_to_current_epoch(client: &Arc<dyn EngineClient>, honey_badger: &mut HoneyBadger) {
-		if let Some(parent_block_number) = client.block_number(BlockId::Latest) {
-			let next_block = parent_block_number + 1;
-			if next_block != honey_badger.epoch() {
-				trace!(target: "consensus", "Skipping honey_badger forward to epoch(block) {}, was at epoch(block) {}.", next_block, honey_badger.epoch());
-			}
-			honey_badger.skip_to_epoch(next_block);
-		} else {
-			error!(target: "consensus", "The current chain latest block number could not be obtained.");
+	fn skip_to_current_epoch(honey_badger: &mut HoneyBadger, block_nr: u64) {
+		let next_block = block_nr + 1;
+		if next_block != honey_badger.epoch() {
+			trace!(target: "consensus", "Skipping honey_badger forward to epoch(block) {}, was at epoch(block) {}.", next_block, honey_badger.epoch());
 		}
+		honey_badger.skip_to_epoch(next_block);
 	}
 
 	pub fn process_message(
 		&mut self,
 		client: Arc<dyn EngineClient>,
+		signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 		sender_id: NodeId,
 		message: HbMessage,
 	) -> Option<HoneyBadgerStep> {
+		// Ensure we evaluate at the same block # in the entire upward call graph to avoid inconsistent state.
+		let latest_block_number = client.block_number(BlockId::Latest)?;
+
+		// Update honey_badger *before* trying to use it to make sure we use the data
+		// structures matching the current epoch.
+		self.update_honeybadger(
+			client.clone(),
+			signer,
+			BlockId::Number(latest_block_number),
+			false,
+		);
 		// If honey_badger is None we are not a validator, nothing to do.
 		let honey_badger = self.honey_badger.as_mut()?;
-		HbbftState::skip_to_current_epoch(&client, honey_badger);
+		HbbftState::skip_to_current_epoch(honey_badger, latest_block_number);
+
+		// Note that if the message is for a future epoch we do not know if the current honey_badger
+		// instance is the correct one to use. Tt may change if the the POSDAO epoch changes, causing
+		// consensus messages to get lost.
+		if message.epoch() > honey_badger.epoch() {
+			error!(target: "consensus", "The current chain latest block number could not be obtained.");
+			panic!("Caching of future epochs not implemented yet!");
+		}
 
 		if let Ok(step) = honey_badger.handle_message(&sender_id, message) {
 			Some(step)
@@ -121,13 +136,14 @@ impl HbbftState {
 	pub fn contribute_if_contribution_threshold_reached(
 		&mut self,
 		client: Arc<dyn EngineClient>,
+		signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 	) -> Option<HoneyBadgerStep> {
 		// If honey_badger is None we are not a validator, nothing to do.
 		let honey_badger = self.honey_badger.as_mut()?;
 		let network_info = self.network_info.as_ref()?;
 
 		if honey_badger.received_proposals() > network_info.num_faulty() {
-			return self.try_send_contribution(client);
+			return self.try_send_contribution(client, signer);
 		}
 		None
 	}
@@ -135,12 +151,25 @@ impl HbbftState {
 	pub fn try_send_contribution(
 		&mut self,
 		client: Arc<dyn EngineClient>,
+		signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 	) -> Option<HoneyBadgerStep> {
+		// Ensure we evaluate at the same block # in the entire upward call graph to avoid inconsistent state.
+		let latest_block_number = client.block_number(BlockId::Latest)?;
+
+		// Update honey_badger *before* trying to use it to make sure we use the data
+		// structures matching the current epoch.
+		self.update_honeybadger(
+			client.clone(),
+			signer,
+			BlockId::Number(latest_block_number),
+			false,
+		);
+
 		// If honey_badger is None we are not a validator, nothing to do.
 		let honey_badger = self.honey_badger.as_mut()?;
 
 		// Make sure we are in the most current epoch.
-		HbbftState::skip_to_current_epoch(&client, honey_badger);
+		HbbftState::skip_to_current_epoch(honey_badger, latest_block_number);
 
 		// If we already sent a contribution for this epoch, there is nothing to do.
 		if honey_badger.has_input() {

@@ -22,14 +22,15 @@ pub fn get_posdao_epoch(client: &dyn EngineClient, block_id: BlockId) -> Result<
 	call_const_staking!(c, staking_epoch)
 }
 
-pub fn get_posdao_epoch_start(client: &dyn EngineClient) -> Result<U256, CallError> {
-	let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
+pub fn get_posdao_epoch_start(
+	client: &dyn EngineClient,
+	block_id: BlockId,
+) -> Result<U256, CallError> {
+	let c = BoundContract::bind(client, block_id, *STAKING_CONTRACT_ADDRESS);
 	call_const_staking!(c, staking_epoch_start_block)
 }
 
-pub fn start_time_of_next_phase_transition(
-	client: &dyn EngineClient,
-) -> Result<U256, CallError> {
+pub fn start_time_of_next_phase_transition(client: &dyn EngineClient) -> Result<U256, CallError> {
 	let c = BoundContract::bind(client, BlockId::Latest, *STAKING_CONTRACT_ADDRESS);
 	call_const_staking!(c, start_time_of_next_phase_transition)
 }

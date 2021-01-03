@@ -29,10 +29,10 @@ use serde::Deserialize;
 use serde_json;
 
 use crate::contracts::keygen_history::{initialize_synckeygen, send_keygen_transactions};
+use crate::contracts::staking::start_time_of_next_phase_transition;
 use crate::contracts::validator_set::{
 	get_pending_validators, is_pending_validator, ValidatorType,
 };
-use crate::contracts::staking::start_time_of_next_phase_transition;
 use crate::contribution::{unix_now_millis, unix_now_secs};
 use crate::hbbft_state::{Batch, HbMessage, HbbftState, HoneyBadgerStep};
 use crate::sealing::{self, RlpSig, Sealing};
@@ -283,10 +283,12 @@ impl HoneyBadgerBFT {
 	) -> Result<(), EngineError> {
 		let client = self.client_arc().ok_or(EngineError::RequiresClient)?;
 		trace!(target: "consensus", "Received message of idx {}  {:?} from {}", msg_idx, message, sender_id);
-		let step = self
-			.hbbft_state
-			.write()
-			.process_message(client.clone(), sender_id, message);
+		let step = self.hbbft_state.write().process_message(
+			client.clone(),
+			&self.signer,
+			sender_id,
+			message,
+		);
 
 		if let Some(step) = step {
 			self.process_step(client, step);
@@ -402,7 +404,7 @@ impl HoneyBadgerBFT {
 		let step = self
 			.hbbft_state
 			.write()
-			.contribute_if_contribution_threshold_reached(client.clone());
+			.contribute_if_contribution_threshold_reached(client.clone(), &self.signer);
 		if let Some(step) = step {
 			self.process_step(client, step)
 		}
@@ -416,7 +418,7 @@ impl HoneyBadgerBFT {
 		let step = self
 			.hbbft_state
 			.write()
-			.try_send_contribution(client.clone());
+			.try_send_contribution(client.clone(), &self.signer);
 		if let Some(step) = step {
 			self.process_step(client, step)
 		}
@@ -452,7 +454,6 @@ impl HoneyBadgerBFT {
 		self.client.read().as_ref().and_then(Weak::upgrade)
 	}
 
-
 	fn start_hbbft_epoch_if_next_phase(&self) {
 		match self.client_arc() {
 			None => return,
@@ -470,7 +471,6 @@ impl HoneyBadgerBFT {
 			}
 		}
 	}
-
 
 	/// Returns true if we are in the keygen phase and a new key has been generated.
 	fn do_keygen(&self) -> bool {
@@ -518,11 +518,12 @@ impl HoneyBadgerBFT {
 
 	fn check_for_epoch_change(&self) -> Option<()> {
 		let client = self.client_arc()?;
-		if let None = self
-			.hbbft_state
-			.write()
-			.update_honeybadger(client, &self.signer, false)
-		{
+		if let None = self.hbbft_state.write().update_honeybadger(
+			client,
+			&self.signer,
+			BlockId::Latest,
+			false,
+		) {
 			info!(target: "consensus", "Fatal: Updating Honey Badger instance failed!");
 		}
 		Some(())
@@ -602,11 +603,12 @@ impl Engine for HoneyBadgerBFT {
 	fn register_client(&self, client: Weak<dyn EngineClient>) {
 		*self.client.write() = Some(client.clone());
 		if let Some(client) = self.client_arc() {
-			if let None = self
-				.hbbft_state
-				.write()
-				.update_honeybadger(client, &self.signer, true)
-			{
+			if let None = self.hbbft_state.write().update_honeybadger(
+				client,
+				&self.signer,
+				BlockId::Latest,
+				true,
+			) {
 				// As long as the client is set we should be able to initialize as a regular node.
 				error!(target: "engine", "Error during HoneyBadger initialization!");
 			}
@@ -616,11 +618,12 @@ impl Engine for HoneyBadgerBFT {
 	fn set_signer(&self, signer: Option<Box<dyn EngineSigner>>) {
 		*self.signer.write() = signer;
 		if let Some(client) = self.client_arc() {
-			if let None = self
-				.hbbft_state
-				.write()
-				.update_honeybadger(client, &self.signer, true)
-			{
+			if let None = self.hbbft_state.write().update_honeybadger(
+				client,
+				&self.signer,
+				BlockId::Latest,
+				true,
+			) {
 				info!(target: "engine", "HoneyBadger Algorithm could not be created, Client possibly not set yet.");
 			}
 		}
