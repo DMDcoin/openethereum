@@ -157,7 +157,7 @@ impl HbbftState {
 		// instance is the correct one to use. Tt may change if the the POSDAO epoch changes, causing
 		// consensus messages to get lost.
 		if message.epoch() > honey_badger.epoch() {
-			error!(target: "consensus", "Message from future epoch, caching it for handling it in when the epoch is current.");
+			trace!(target: "consensus", "Message from future epoch, caching it for handling it in when the epoch is current.");
 			self.future_messages_cache
 				.entry(message.epoch())
 				.or_default()

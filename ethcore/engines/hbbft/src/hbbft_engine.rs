@@ -620,6 +620,7 @@ impl Engine for HoneyBadgerBFT {
 		{
 			Ok(())
 		} else {
+			error!(target: "engine", "Invalid seal for block #{}!", header.number());
 			Err(BlockError::InvalidSeal.into())
 		}
 	}
