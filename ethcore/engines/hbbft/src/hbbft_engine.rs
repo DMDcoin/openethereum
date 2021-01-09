@@ -732,6 +732,11 @@ impl Engine for HoneyBadgerBFT {
 	}
 
 	fn generate_seal(&self, block: &ExecutedBlock, _parent: &Header) -> Seal {
+		let client = match self.client_arc() {
+			None => return Seal::None,
+			Some(client) => client,
+		};
+
 		let block_num = block.header.number();
 		let sealing = self.sealing.read();
 		let sig = match sealing.get(&block_num).and_then(Sealing::signature) {
@@ -740,15 +745,13 @@ impl Engine for HoneyBadgerBFT {
 		};
 		if !self
 			.hbbft_state
-			.read()
-			.public_master_key
-			.expect("Missing public master key")
-			.verify(sig, block.header.bare_hash())
+			.write()
+			.verify_seal(client, &self.signer, &sig, &block.header)
 		{
-			error!(target: "consensus", "Threshold signature does not match new block.");
+			error!(target: "consensus", "generate_seal: Threshold signature does not match new block.");
 			return Seal::None;
 		}
-		trace!(target: "consensus", "Returning seal for block {}.", block_num);
+		trace!(target: "consensus", "Returning generated seal for block {}.", block_num);
 		Seal::Regular(vec![rlp::encode(&RlpSig(sig))])
 	}
 

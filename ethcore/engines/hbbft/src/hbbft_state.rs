@@ -23,9 +23,9 @@ pub(crate) type HoneyBadgerResult = honey_badger::Result<HoneyBadgerStep>;
 
 pub(crate) struct HbbftState {
 	pub network_info: Option<NetworkInfo<NodeId>>,
-	pub honey_badger: Option<HoneyBadger>,
-	pub public_master_key: Option<PublicKey>,
-	pub current_posdao_epoch: u64,
+	honey_badger: Option<HoneyBadger>,
+	public_master_key: Option<PublicKey>,
+	current_posdao_epoch: u64,
 	future_messages_cache: BTreeMap<u64, Vec<(NodeId, HbMessage)>>,
 }
 
