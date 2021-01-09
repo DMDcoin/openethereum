@@ -1,7 +1,8 @@
 use client_traits::EngineClient;
+use common_types::header::Header;
 use common_types::ids::BlockId;
 use engine::signer::EngineSigner;
-use hbbft::crypto::PublicKey;
+use hbbft::crypto::{PublicKey, Signature};
 use hbbft::honey_badger::{self, HoneyBadgerBuilder};
 use hbbft::{Epoched, NetworkInfo};
 use parking_lot::RwLock;
@@ -236,6 +237,39 @@ impl HbbftState {
 				// TODO: Report detailed consensus step errors
 				error!(target: "consensus", "Error on proposing Contribution.");
 				None
+			}
+		}
+	}
+
+	pub fn verify_seal(
+		&mut self,
+		client: Arc<dyn EngineClient>,
+		signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
+		signature: &Signature,
+		header: &Header,
+	) -> bool {
+		self.skip_to_current_epoch(client.clone(), signer);
+
+		// Check if posdao epoch fits the parent block of the header seal to verify.
+		let parent_block_nr = header.number() - 1;
+		let target_posdao_epoch = match get_posdao_epoch(&*client, BlockId::Number(parent_block_nr))
+		{
+			Ok(number) => number.low_u64(),
+			Err(e) => {
+				error!(target: "consensus", "Failed to verify seal - reading POSDAO epoch from contract failed! Error: {:?}", e);
+				return false;
+			}
+		};
+		if self.current_posdao_epoch != target_posdao_epoch {
+			error!(target: "consensus", "Failed to verify seal - hbbft state epoch does not match epoch at the header's parent!");
+			return false;
+		}
+
+		match self.public_master_key {
+			Some(key) => key.verify(signature, header.bare_hash()),
+			None => {
+				error!(target: "consensus", "Failed to verify seal - public master key not available!");
+				false
 			}
 		}
 	}

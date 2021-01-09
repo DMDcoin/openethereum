@@ -553,7 +553,7 @@ impl HoneyBadgerBFT {
 			BlockId::Latest,
 			false,
 		) {
-			info!(target: "consensus", "Fatal: Updating Honey Badger instance failed!");
+			error!(target: "consensus", "Fatal: Updating Honey Badger instance failed!");
 		}
 		Some(())
 	}
@@ -595,12 +595,9 @@ impl Engine for HoneyBadgerBFT {
 	/// We check the signature here since at this point the blocks are imported in-order.
 	/// To verify the signature we need the parent block already imported on the chain.
 	fn verify_block_family(&self, header: &Header, _parent: &Header) -> Result<(), Error> {
-		self.check_for_epoch_change();
+		let client = self.client_arc().ok_or(EngineError::RequiresClient)?;
 
-		let latest_block_nr = match self.client_arc() {
-			Some(client) => client.block_number(BlockId::Latest).expect("must succeed"),
-			None => 0,
-		};
+		let latest_block_nr = client.block_number(BlockId::Latest).expect("must succeed");
 
 		if header.number() > (latest_block_nr + 1) {
 			error!(target: "engine", "Phase 3 block verification out of order!");
@@ -610,13 +607,12 @@ impl Engine for HoneyBadgerBFT {
 		if header.seal().len() != 1 {
 			return Err(BlockError::InvalidSeal.into());
 		}
+
 		let RlpSig(sig) = rlp::decode(header.seal().first().ok_or(BlockError::InvalidSeal)?)?;
 		if self
 			.hbbft_state
-			.read()
-			.public_master_key
-			.expect("Missing public master key")
-			.verify(&sig, header.bare_hash())
+			.write()
+			.verify_seal(client, &self.signer, &sig, header)
 		{
 			Ok(())
 		} else {
