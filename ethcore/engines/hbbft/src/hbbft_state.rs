@@ -22,7 +22,7 @@ pub(crate) type HoneyBadgerStep = honey_badger::Step<Contribution, NodeId>;
 pub(crate) type HoneyBadgerResult = honey_badger::Result<HoneyBadgerStep>;
 
 pub(crate) struct HbbftState {
-	pub network_info: Option<NetworkInfo<NodeId>>,
+	network_info: Option<NetworkInfo<NodeId>>,
 	honey_badger: Option<HoneyBadger>,
 	public_master_key: Option<PublicKey>,
 	current_posdao_epoch: u64,
@@ -92,10 +92,40 @@ impl HbbftState {
 	}
 
 	// Call periodically to assure cached messages will eventually be delivered.
-	pub fn replay_cached_messages(&mut self) -> Option<Vec<HoneyBadgerResult>> {
+	pub fn replay_cached_messages(
+		&mut self,
+		client: Arc<dyn EngineClient>,
+	) -> Option<(Vec<HoneyBadgerResult>, NetworkInfo<NodeId>)> {
 		let honey_badger = self.honey_badger.as_mut()?;
 
+		// Caveat:
+		// If all necessary honey badger processing for an hbbft epoch is done the HoneyBadger
+		// implementation automatically jumps to the next hbbft epoch.
+		// This means hbbft may already be on the next epoch while the current epoch/block is not
+		// imported yet.
+		// The Validator Set may actually change, so we do not know to whom to send these messages yet.
+		// We have to attempt to switch to the newest block, and then check if the hbbft epoch's parent
+		// block is already imported. If not we have to wait until that block is available.
+		let parent_block = honey_badger.epoch() - 1;
+		match get_posdao_epoch(&*client, BlockId::Number(parent_block)) {
+			Ok(epoch) => {
+				if epoch.low_u64() != self.current_posdao_epoch {
+					trace!(target: "engine", "replay_cached_messages: Parent block imported, but hbbft state not updated yet, re-trying later.");
+					return None;
+				}
+			}
+			Err(e) => {
+				trace!(target: "engine", "replay_cached_messages: Could not query parent posdao epoch, re-trying later. Contract call error: {:?}", e);
+				return None;
+			}
+		}
+
 		let messages = self.future_messages_cache.get(&honey_badger.epoch())?;
+		if messages.is_empty() {
+			return None;
+		}
+
+		let network_info = self.network_info.as_ref()?.clone();
 
 		let all_steps: Vec<_> = messages
 			.iter()
@@ -110,7 +140,7 @@ impl HbbftState {
 			.future_messages_cache
 			.split_off(&(honey_badger.epoch() + 1));
 
-		Some(all_steps)
+		Some((all_steps, network_info))
 	}
 
 	fn skip_to_current_epoch(
@@ -148,7 +178,7 @@ impl HbbftState {
 		signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
 		sender_id: NodeId,
 		message: HbMessage,
-	) -> Option<HoneyBadgerStep> {
+	) -> Option<(HoneyBadgerStep, NetworkInfo<NodeId>)> {
 		self.skip_to_current_epoch(client, signer)?;
 
 		// If honey_badger is None we are not a validator, nothing to do.
@@ -166,8 +196,10 @@ impl HbbftState {
 			return None;
 		}
 
+		let network_info = self.network_info.as_ref()?.clone();
+
 		if let Ok(step) = honey_badger.handle_message(&sender_id, message) {
-			Some(step)
+			Some((step, network_info))
 		} else {
 			// TODO: Report consensus step errors
 			error!(target: "consensus", "Error on handling HoneyBadger message.");
@@ -179,7 +211,7 @@ impl HbbftState {
 		&mut self,
 		client: Arc<dyn EngineClient>,
 		signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
-	) -> Option<HoneyBadgerStep> {
+	) -> Option<(HoneyBadgerStep, NetworkInfo<NodeId>)> {
 		// If honey_badger is None we are not a validator, nothing to do.
 		let honey_badger = self.honey_badger.as_mut()?;
 		let network_info = self.network_info.as_ref()?;
@@ -194,7 +226,7 @@ impl HbbftState {
 		&mut self,
 		client: Arc<dyn EngineClient>,
 		signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
-	) -> Option<HoneyBadgerStep> {
+	) -> Option<(HoneyBadgerStep, NetworkInfo<NodeId>)> {
 		// Make sure we are in the most current epoch.
 		self.skip_to_current_epoch(client.clone(), signer)?;
 
@@ -217,6 +249,8 @@ impl HbbftState {
 			return None;
 		}
 
+		let network_info = self.network_info.as_ref()?.clone();
+
 		trace!(target: "consensus", "Writing contribution for hbbft epoch(block) {}.", honey_badger.epoch());
 
 		// Now we can select the transactions to include in our contribution.
@@ -232,7 +266,7 @@ impl HbbftState {
 		let mut rng = rand::thread_rng();
 		let step = honey_badger.propose(&input_contribution, &mut rng);
 		match step {
-			Ok(step) => Some(step),
+			Ok(step) => Some((step, network_info)),
 			_ => {
 				// TODO: Report detailed consensus step errors
 				error!(target: "consensus", "Error on proposing Contribution.");
@@ -272,5 +306,26 @@ impl HbbftState {
 				false
 			}
 		}
+	}
+
+	pub fn network_info_for(
+		&mut self,
+		client: Arc<dyn EngineClient>,
+		signer: &Arc<RwLock<Option<Box<dyn EngineSigner>>>>,
+		block_nr: u64,
+	) -> Option<NetworkInfo<NodeId>> {
+		self.skip_to_current_epoch(client.clone(), signer);
+
+		let posdao_epoch = get_posdao_epoch(&*client, BlockId::Number(block_nr - 1))
+			.ok()?
+			.low_u64();
+
+		if self.current_posdao_epoch != posdao_epoch {
+			error!(target: "consensus", "Trying to get the network info from a different epoch. Current epoch: {}, Requested epoch: {}",
+				   self.current_posdao_epoch, posdao_epoch);
+			return None;
+		}
+
+		self.network_info.clone()
 	}
 }

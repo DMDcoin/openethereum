@@ -18,7 +18,7 @@ use common_types::{
 use engine::{signer::EngineSigner, Engine};
 use ethereum_types::{H256, H512, U256};
 use ethjson::spec::HbbftParams;
-use hbbft::Target;
+use hbbft::{NetworkInfo, Target};
 use io::{IoContext, IoHandler, IoService, TimerToken};
 use itertools::Itertools;
 use machine::{ExecutedBlock, Machine};
@@ -193,11 +193,17 @@ impl HoneyBadgerBFT {
 		Ok(engine)
 	}
 
-	fn process_output(&self, client: Arc<dyn EngineClient>, output: Vec<Batch>) {
+	fn process_output(
+		&self,
+		client: Arc<dyn EngineClient>,
+		output: Vec<Batch>,
+		network_info: &NetworkInfo<NodeId>,
+	) {
 		// TODO: Multiple outputs are possible,
 		//       process all outputs, respecting their epoch context.
 		if output.len() > 1 {
 			error!(target: "consensus", "UNHANDLED EPOCH OUTPUTS!");
+			panic!("UNHANDLED EPOCH OUTPUTS!");
 		}
 		let batch = match output.first() {
 			None => return,
@@ -262,7 +268,7 @@ impl HoneyBadgerBFT {
 				.sealing
 				.write()
 				.entry(block_num)
-				.or_insert_with(|| self.new_sealing())
+				.or_insert_with(|| self.new_sealing(network_info))
 				.sign(hash)
 			{
 				Ok(step) => step,
@@ -272,7 +278,7 @@ impl HoneyBadgerBFT {
 					return;
 				}
 			};
-			self.process_seal_step(client, step, block_num);
+			self.process_seal_step(client, step, block_num, network_info);
 		} else {
 			error!(target: "consensus", "Could not create pending block for hbbft epoch {}: ", batch.epoch);
 		}
@@ -293,8 +299,8 @@ impl HoneyBadgerBFT {
 			message,
 		);
 
-		if let Some(step) = step {
-			self.process_step(client, step);
+		if let Some((step, network_info)) = step {
+			self.process_step(client, step, &network_info);
 			self.join_hbbft_epoch()?;
 		}
 		Ok(())
@@ -314,35 +320,43 @@ impl HoneyBadgerBFT {
 			}
 		}
 
+		let network_info = match self.hbbft_state.write().network_info_for(
+			client.clone(),
+			&self.signer,
+			block_num,
+		) {
+			Some(n) => n,
+			None => {
+				error!(target: "consensus", "Sealing message for block #{} could not be processed due to missing/mismatching network info.", block_num);
+				return Err(EngineError::UnexpectedMessage);
+			}
+		};
+
 		trace!(target: "consensus", "Received signature share for block {} from {}", block_num, sender_id);
 		let step_result = self
 			.sealing
 			.write()
 			.entry(block_num)
-			.or_insert_with(|| self.new_sealing())
+			.or_insert_with(|| self.new_sealing(&network_info))
 			.handle_message(&sender_id, message);
 		match step_result {
-			Ok(step) => self.process_seal_step(client, step, block_num),
+			Ok(step) => self.process_seal_step(client, step, block_num, &network_info),
 			Err(err) => error!(target: "consensus", "Error on ThresholdSign step: {:?}", err), // TODO: Errors
 		}
 		Ok(())
 	}
 
-	fn dispatch_messages<I>(&self, client: &Arc<dyn EngineClient>, messages: I)
-	where
+	fn dispatch_messages<I>(
+		&self,
+		client: &Arc<dyn EngineClient>,
+		messages: I,
+		net_info: &NetworkInfo<NodeId>,
+	) where
 		I: IntoIterator<Item = TargetedMessage>,
 	{
 		for m in messages {
 			let ser =
 				serde_json::to_vec(&m.message).expect("Serialization of consensus message failed");
-			let net_info = {
-				let opt_net_info = self.hbbft_state.read();
-				opt_net_info
-					.network_info
-					.as_ref()
-					.expect("Network Info expected to be initialized")
-					.clone()
-			};
 			match m.target {
 				Target::Nodes(set) => {
 					trace!(target: "consensus", "Dispatching message {:?} to {:?}", m.message, set);
@@ -370,12 +384,13 @@ impl HoneyBadgerBFT {
 		client: Arc<dyn EngineClient>,
 		step: sealing::Step,
 		block_num: BlockNumber,
+		network_info: &NetworkInfo<NodeId>,
 	) {
 		let messages = step
 			.messages
 			.into_iter()
 			.map(|msg| msg.map(|m| Message::Sealing(block_num, m)));
-		self.dispatch_messages(&client, messages);
+		self.dispatch_messages(&client, messages, network_info);
 		if let Some(sig) = step.output.into_iter().next() {
 			trace!(target: "consensus", "Signature for block {} is ready", block_num);
 			let state = Sealing::Complete(sig);
@@ -384,7 +399,12 @@ impl HoneyBadgerBFT {
 		}
 	}
 
-	fn process_step(&self, client: Arc<dyn EngineClient>, step: HoneyBadgerStep) {
+	fn process_step(
+		&self,
+		client: Arc<dyn EngineClient>,
+		step: HoneyBadgerStep,
+		network_info: &NetworkInfo<NodeId>,
+	) {
 		let mut message_counter = self.message_counter.write();
 		let messages = step.messages.into_iter().map(|msg| {
 			*message_counter += 1;
@@ -393,8 +413,8 @@ impl HoneyBadgerBFT {
 				message: Message::HoneyBadger(*message_counter, msg.message),
 			}
 		});
-		self.dispatch_messages(&client, messages);
-		self.process_output(client, step.output);
+		self.dispatch_messages(&client, messages, network_info);
+		self.process_output(client, step.output, network_info);
 	}
 
 	/// Conditionally joins the current hbbft epoch if the number of received
@@ -408,8 +428,8 @@ impl HoneyBadgerBFT {
 			.hbbft_state
 			.write()
 			.contribute_if_contribution_threshold_reached(client.clone(), &self.signer);
-		if let Some(step) = step {
-			self.process_step(client, step)
+		if let Some((step, network_info)) = step {
+			self.process_step(client, step, &network_info)
 		}
 		Ok(())
 	}
@@ -422,8 +442,8 @@ impl HoneyBadgerBFT {
 			.hbbft_state
 			.write()
 			.try_send_contribution(client.clone(), &self.signer);
-		if let Some(step) = step {
-			self.process_step(client, step)
+		if let Some((step, network_info)) = step {
+			self.process_step(client, step, &network_info)
 		}
 	}
 
@@ -442,15 +462,8 @@ impl HoneyBadgerBFT {
 		}
 	}
 
-	fn new_sealing(&self) -> Sealing {
-		let netinfo = self
-			.hbbft_state
-			.read()
-			.network_info
-			.as_ref()
-			.expect("NetworkInfo not found")
-			.clone();
-		Sealing::new(netinfo)
+	fn new_sealing(&self, network_info: &NetworkInfo<NodeId>) -> Sealing {
+		Sealing::new(network_info.clone())
 	}
 
 	fn client_arc(&self) -> Option<Arc<dyn EngineClient>> {
@@ -477,15 +490,18 @@ impl HoneyBadgerBFT {
 
 	fn replay_cached_messages(&self) -> Option<()> {
 		let client = self.client_arc()?;
-		let steps = self.hbbft_state.write().replay_cached_messages();
+		let steps = self
+			.hbbft_state
+			.write()
+			.replay_cached_messages(client.clone());
 		let mut processed_step = false;
-		if let Some(steps) = steps {
+		if let Some((steps, network_info)) = steps {
 			for step in steps {
 				match step {
 					Ok(step) => {
 						trace!(target: "engine", "Processing cached message step");
 						processed_step = true;
-						self.process_step(client.clone(), step)
+						self.process_step(client.clone(), step, &network_info)
 					}
 					Err(e) => error!(target: "engine", "Error handling replayed message: {}", e),
 				}
