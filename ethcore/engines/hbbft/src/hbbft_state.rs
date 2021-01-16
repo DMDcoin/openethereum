@@ -295,8 +295,45 @@ impl HbbftState {
 			}
 		};
 		if self.current_posdao_epoch != target_posdao_epoch {
-			error!(target: "consensus", "Failed to verify seal - hbbft state epoch does not match epoch at the header's parent!");
-			return false;
+			trace!(target: "consensus", "verify_seal - hbbft state epoch does not match epoch at the header's parent, attempting to reconstruct the appropriate public key share from scratch.");
+			// If the requested block nr is already imported we try to generate the public master key from scratch.
+			let posdao_epoch_start =
+				match get_posdao_epoch_start(&*client, BlockId::Number(parent_block_nr)) {
+					Ok(epoch_start) => epoch_start,
+					Err(e) => {
+						error!(target: "consensus", "Querying epoch start block failed with error: {:?}", e);
+						return false;
+					}
+				};
+
+			let synckeygen = match initialize_synckeygen(
+				&*client,
+				&Arc::new(RwLock::new(Option::None)),
+				BlockId::Number(posdao_epoch_start.low_u64()),
+				ValidatorType::Current,
+			) {
+				Ok(synckeygen) => synckeygen,
+				Err(e) => {
+					error!(target: "consensus", "Synckeygen failed with error: {:?}", e);
+					return false;
+				}
+			};
+
+			if !synckeygen.is_ready() {
+				error!(target: "consensus", "Synckeygen not ready when it sohuld be!");
+				return false;
+			}
+
+			let pks = match synckeygen.generate() {
+				Ok((pks, _)) => pks,
+				Err(e) => {
+					error!(target: "consensus", "Generating of public key share failed with error: {:?}", e);
+					return false;
+				}
+			};
+
+			trace!(target: "consensus", "verify_seal - successfully reconstructed public key share of past posdao epoch.");
+			return pks.public_key().verify(signature, header.bare_hash());
 		}
 
 		match self.public_master_key {
