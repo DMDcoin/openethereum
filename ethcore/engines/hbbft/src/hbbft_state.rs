@@ -110,12 +110,12 @@ impl HbbftState {
 		match get_posdao_epoch(&*client, BlockId::Number(parent_block)) {
 			Ok(epoch) => {
 				if epoch.low_u64() != self.current_posdao_epoch {
-					trace!(target: "engine", "replay_cached_messages: Parent block imported, but hbbft state not updated yet, re-trying later.");
+					trace!(target: "engine", "replay_cached_messages: Parent block(#{}) imported, but hbbft state not updated yet, re-trying later.", parent_block);
 					return None;
 				}
 			}
-			Err(e) => {
-				trace!(target: "engine", "replay_cached_messages: Could not query parent posdao epoch, re-trying later. Contract call error: {:?}", e);
+			Err(_) => {
+				trace!(target: "engine", "replay_cached_messages: Could not query posdao epoch at parent block#{}, re-trying later. Probably due to the block not being imported yet.", parent_block);
 				return None;
 			}
 		}
@@ -188,7 +188,7 @@ impl HbbftState {
 		// instance is the correct one to use. Tt may change if the the POSDAO epoch changes, causing
 		// consensus messages to get lost.
 		if message.epoch() > honey_badger.epoch() {
-			trace!(target: "consensus", "Message from future epoch, caching it for handling it in when the epoch is current.");
+			trace!(target: "consensus", "Message from future epoch, caching it for handling it in when the epoch is current. Current hbbft epoch is: {}", honey_badger.epoch());
 			self.future_messages_cache
 				.entry(message.epoch())
 				.or_default()
