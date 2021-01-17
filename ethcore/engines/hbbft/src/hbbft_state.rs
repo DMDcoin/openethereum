@@ -98,6 +98,11 @@ impl HbbftState {
 	) -> Option<(Vec<HoneyBadgerResult>, NetworkInfo<NodeId>)> {
 		let honey_badger = self.honey_badger.as_mut()?;
 
+		if honey_badger.epoch() == 0 {
+			// honey_badger not initialized yet, wait to be called after initialization.
+			return None;
+		}
+
 		// Caveat:
 		// If all necessary honey badger processing for an hbbft epoch is done the HoneyBadger
 		// implementation automatically jumps to the next hbbft epoch.
