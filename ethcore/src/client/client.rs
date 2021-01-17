@@ -1086,14 +1086,14 @@ impl Client {
 		};
 
 		self.block_header(id).and_then(|header| {
-			let state_db = self.state_db.read();
+			let db = self.state_db.read().boxed_clone();
+
 			// early exit for pruned blocks
-			if state_db.is_prunable() && self.pruning_info().earliest_state > block_number {
+			if db.is_prunable() && self.pruning_info().earliest_state > block_number {
 				trace!(target: "client", "State for block #{} is pruned. Earliest state: {:?}", block_number, self.pruning_info().earliest_state);
 				return None;
 			}
 
-			let db = state_db.boxed_clone();
 			let root = header.state_root();
 			State::from_existing(db, root, self.engine.account_start_nonce(block_number), self.factories.clone()).ok()
 		})
