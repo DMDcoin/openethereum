@@ -2235,6 +2235,10 @@ impl BlockChainClient for Client {
 			None => true,
 		}
 	}
+
+	fn next_nonce(&self, address: &Address) -> U256 {
+		self.importer.miner.next_nonce(self, address)
+	}
 }
 
 impl IoClient for Client {

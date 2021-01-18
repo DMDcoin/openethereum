@@ -267,7 +267,7 @@ pub fn send_keygen_transactions(
 
 		let part_transaction = TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_part_data.0)
 			.gas(U256::from(7_000_000))
-			.nonce(full_client.latest_nonce(&address))
+			.nonce(full_client.next_nonce(&address))
 			.gas_price(U256::from(10000000000u64));
 		full_client
 			.transact_silently(part_transaction)
@@ -299,7 +299,7 @@ pub fn send_keygen_transactions(
 
 		let acks_transaction = TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_acks_data.0)
 			.gas(U256::from(7_000_000))
-			.nonce(full_client.latest_nonce(&address))
+			.nonce(full_client.next_nonce(&address))
 			.gas_price(U256::from(10000000000u64));
 		full_client
 			.transact_silently(acks_transaction)
