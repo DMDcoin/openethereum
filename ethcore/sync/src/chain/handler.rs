@@ -84,11 +84,13 @@ impl SyncHandler {
 			match result {
 				Err(DownloaderImportError::Invalid) => {
 					trace!(target:"sync", "{} -> Invalid packet {}", peer, packet_id.id());
-					io.disable_peer(peer);
-					sync.deactivate_peer(io, peer);
+					//io.disable_peer(peer);
+					//sync.deactivate_peer(io, peer);
+					sync.sync_peer(io, peer, false);
 				},
 				Err(DownloaderImportError::Useless) => {
-					sync.deactivate_peer(io, peer);
+					//sync.deactivate_peer(io, peer);
+					sync.sync_peer(io, peer, false);
 				},
 				Ok(()) => {
 					// give a task to the same peer first
