@@ -211,6 +211,8 @@ pub trait IoClient: Sync + Send {
 
 	/// Queue consensus engine message.
 	fn queue_consensus_message(&self, message: Bytes, node_id: Option<H512>);
+
+
 }
 
 /// Implement this for clients that need logic to decide when/how to advance.
@@ -417,6 +419,9 @@ pub trait BlockChainClient:
 
 	/// Returns true if the chain is currently syncing.
 	fn is_major_syncing(&self) -> bool;
+
+	/// Returns the next nonce for the given address, taking the transaction queue into account.
+	fn next_nonce(&self, address: &Address) -> U256;
 }
 
 /// The data required for a `Client` to create a transaction.
