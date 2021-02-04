@@ -115,10 +115,10 @@ impl SyncSupplier {
 				},
 				// Packets that require the peer to be confirmed
 				_ => {
-					if !sync.read().peers.contains_key(&peer) {
-						debug!(target:"sync", "Unexpected packet {} from unregistered peer: {}:{}", packet_id, peer, io.peer_version(peer));
-						return;
-					}
+					// if !sync.read().peers.contains_key(&peer) {
+					// 	debug!(target:"sync", "Unexpected packet {} from unregistered peer: {}:{}", packet_id, peer, io.peer_version(peer));
+					// 	return;
+					// }
 					trace!(target: "sync", "{} -> Dispatching packet: {}", peer, packet_id);
 
 					match id {

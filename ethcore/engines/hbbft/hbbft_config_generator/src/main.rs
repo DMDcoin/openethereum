@@ -218,7 +218,7 @@ fn to_toml(
 	mining.insert("reseal_min_period".into(), Value::Integer(0));
 
 	let mut misc = Map::new();
-	misc.insert("logging".into(), Value::String("".into()));
+	misc.insert("logging".into(), Value::String("txqueue=trace,consensus=trace,engine=trace".into()));
 	misc.insert("log_file".into(), Value::String("parity.log".into()));
 
 	let mut map = Map::new();

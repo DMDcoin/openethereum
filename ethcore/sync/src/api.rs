@@ -690,7 +690,7 @@ impl ChainNotify for EthSync {
 
 			let my_peer_id = match target_peer_id {
 				None => {
-					trace!(target: "consensus", "Cached Messages: peer {:?} not connected, caching message...", target_peer_id);
+					trace!(target: "consensus", "Cached Messages: peer {:?} not connected, caching message...", node_id);
 					let mut lock = self.eth_handler.message_cache.write();
 					lock.entry(node_id.clone()).or_default().push(message_type);
 					return;

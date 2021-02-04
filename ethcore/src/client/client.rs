@@ -57,6 +57,7 @@ use client::{
 	ReopenBlock, SealedBlockImporter,
 };
 use client::ancient_import::AncientVerifier;
+use client::traits::ChainSyncing;
 use client_traits::{
 	AccountData,
 	BadBlocks,
@@ -247,6 +248,9 @@ pub struct Client {
 
 	/// A closure to call when we want to restart the client
 	exit_handler: Mutex<Option<Box<dyn Fn(String) + 'static + Send>>>,
+
+	/// Accessor to query chain syncing state.
+	sync_provider: Mutex<Option<Box<dyn ChainSyncing>>>,
 
 	importer: Importer,
 }
@@ -805,6 +809,7 @@ impl Client {
 			on_user_defaults_change: Mutex::new(None),
 			registrar_address,
 			exit_handler: Mutex::new(None),
+			sync_provider: Mutex::new(None),
 			importer,
 			config,
 		});
@@ -869,6 +874,11 @@ impl Client {
 	/// the restart.
 	pub fn set_exit_handler<F>(&self, f: F) where F: Fn(String) + 'static + Send {
 		*self.exit_handler.lock() = Some(Box::new(f));
+	}
+
+	/// Sets sync provider trait object to access chain sync state from the client/engine.
+	pub fn set_sync_provider(&self, sync_provider: Box<dyn ChainSyncing>) {
+		*self.sync_provider.lock() = Some(sync_provider);
 	}
 
 	/// Returns engine reference.
@@ -1076,14 +1086,14 @@ impl Client {
 		};
 
 		self.block_header(id).and_then(|header| {
-			let state_db = self.state_db.read();
+			let db = self.state_db.read().boxed_clone();
+
 			// early exit for pruned blocks
-			if state_db.is_prunable() && self.pruning_info().earliest_state > block_number {
+			if db.is_prunable() && self.pruning_info().earliest_state > block_number {
 				trace!(target: "client", "State for block #{} is pruned. Earliest state: {:?}", block_number, self.pruning_info().earliest_state);
 				return None;
 			}
 
-			let db = state_db.boxed_clone();
 			let root = header.state_root();
 			State::from_existing(db, root, self.engine.account_start_nonce(block_number), self.factories.clone()).ok()
 		})
@@ -2215,6 +2225,19 @@ impl BlockChainClient for Client {
 	fn transact_silently(&self, tx_request: TransactionRequest) -> Result<(), transaction::Error> {
 		let signed = self.create_transaction(tx_request)?;
 		self.importer.miner.import_own_transaction(self, signed.into(), true)
+	}
+
+	fn is_major_syncing(&self) -> bool {
+		match &*self.sync_provider.lock() {
+			Some(sync_provider) => sync_provider.is_major_syncing(),
+			// We also indicate the "syncing" state when the SyncProvider has not been set,
+			// which usually only happens when the client is not fully configured yet.
+			None => true,
+		}
+	}
+
+	fn next_nonce(&self, address: &Address) -> U256 {
+		self.importer.miner.next_nonce(self, address)
 	}
 }
 

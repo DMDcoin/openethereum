@@ -21,7 +21,7 @@ use std::thread;
 
 use ansi_term::Colour;
 use client_traits::{BlockInfo, BlockChainClient};
-use ethcore::client::{Client, DatabaseCompactionProfile};
+use ethcore::client::{ChainSyncing, Client, DatabaseCompactionProfile};
 use ethcore::miner::{self, stratum, Miner, MinerService, MinerOptions};
 use snapshot::{self, SnapshotConfiguration};
 use spec::SpecParams;
@@ -37,7 +37,7 @@ use miner::external::ExternalMiner;
 use miner::work_notify::WorkPoster;
 use node_filter::NodeFilter;
 use parity_runtime::Runtime;
-use sync::{self, SyncConfig, PrivateTxHandler};
+use sync::{self, SyncConfig, PrivateTxHandler, SyncProvider};
 use types::{
 	client_types::Mode,
 	engines::OptimizeFor,
@@ -360,6 +360,19 @@ fn execute_light_impl<Cr>(cmd: RunCmd, logger: Arc<RotatingLogger>, on_client_rq
 			keep_alive: Box::new((service, ws_server, http_server, ipc_server, runtime)),
 		}
 	})
+}
+
+struct SyncProviderWrapper(Weak<dyn SyncProvider>);
+
+impl ChainSyncing for SyncProviderWrapper {
+	/// are we in the middle of a major sync?
+	fn is_major_syncing(&self) -> bool {
+		match self.0.upgrade() {
+			Some(arc) => arc.is_major_syncing(),
+			// We also indicate the "syncing" state when the SyncProvider has already been destroyed.
+			None => true,
+		}
+	}
 }
 
 fn execute_impl<Cr, Rr>(
@@ -819,6 +832,12 @@ fn execute_impl<Cr, Rr>(
 
 	client.set_exit_handler(on_client_rq);
 	updater.set_exit_handler(on_updater_rq);
+
+	// Registering the sync provider as late as possible to use it as indicator that
+	// client startup has finished.
+	// This is essential to assure no block creation attempt happens before the client
+	// is fully configured.
+	client.set_sync_provider(Box::new(SyncProviderWrapper(Arc::downgrade(&sync_provider))));
 
 	Ok(RunningClient {
 		inner: RunningClientInner::Full {

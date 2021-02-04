@@ -2,7 +2,7 @@ use client_traits::{Balance, Nonce, StateOrBlock};
 use common_types::ids::BlockId;
 use common_types::transaction::{Action, SignedTransaction, Transaction};
 use engine::signer::from_keypair;
-use ethcore::client::Client;
+use ethcore::client::{ChainSyncing, Client};
 use ethcore::miner::{Miner, MinerService};
 use ethcore::test_helpers::generate_dummy_client_with_spec;
 use ethcore::test_helpers::TestNotify;
@@ -20,8 +20,17 @@ pub fn hbbft_spec() -> Spec {
 	.expect(concat!("Chain spec is invalid."))
 }
 
+struct SyncProviderWrapper();
+impl ChainSyncing for SyncProviderWrapper {
+	fn is_major_syncing(&self) -> bool {
+		false
+	}
+}
+
 pub fn hbbft_client() -> std::sync::Arc<ethcore::client::Client> {
-	generate_dummy_client_with_spec(hbbft_spec)
+	let client = generate_dummy_client_with_spec(hbbft_spec);
+	client.set_sync_provider(Box::new(SyncProviderWrapper()));
+	client
 }
 
 pub struct HbbftTestClient {

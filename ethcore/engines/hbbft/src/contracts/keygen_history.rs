@@ -86,7 +86,7 @@ pub fn has_part_of_address_data(
 ) -> Result<bool, CallError> {
 	let c = BoundContract::bind(client, BlockId::Latest, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_part = call_const_key_history!(c, parts, address)?;
-	println!("Part for address {}: {:?}", address, serialized_part);
+	//println!("Part for address {}: {:?}", address, serialized_part);
 	Ok(!serialized_part.is_empty())
 }
 
@@ -99,7 +99,7 @@ pub fn part_of_address(
 ) -> Result<Option<Ack>, CallError> {
 	let c = BoundContract::bind(client, block_id, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_part = call_const_key_history!(c, parts, address)?;
-	println!("Part for address {}: {:?}", address, serialized_part);
+	//println!("Part for address {}: {:?}", address, serialized_part);
 	if serialized_part.is_empty() {
 		return Err(CallError::ReturnValueInvalid);
 	}
@@ -134,13 +134,13 @@ pub fn acks_of_address(
 	let c = BoundContract::bind(client, block_id, *KEYGEN_HISTORY_ADDRESS);
 	let serialized_length = call_const_key_history!(c, get_acks_length, address)?;
 
-	println!(
-		"Acks for address {} is of size: {:?}",
-		address, serialized_length
-	);
+	// println!(
+	// 	"Acks for address {} is of size: {:?}",
+	// 	address, serialized_length
+	// );
 	for n in 0..serialized_length.low_u64() {
 		let serialized_ack = call_const_key_history!(c, acks, address, n)?;
-		println!("Ack #{} for address {}: {:?}", n, address, serialized_ack);
+		//println!("Ack #{} for address {}: {:?}", n, address, serialized_ack);
 		if serialized_ack.is_empty() {
 			return Err(CallError::ReturnValueInvalid);
 		}
@@ -230,6 +230,13 @@ pub fn send_keygen_transactions(
 		None => return Err(CallError::ReturnValueInvalid),
 	};
 
+	let full_client = client.as_full_client().ok_or(CallError::NotFullClient)?;
+
+	// If the chain is still syncing, do not send Parts or Acks.
+	if full_client.is_major_syncing() {
+		return Ok(());
+	}
+
 	let vmap = get_validator_pubkeys(&*client, BlockId::Latest, ValidatorType::Pending)?;
 	let pub_keys: BTreeMap<_, _> = vmap
 		.values()
@@ -247,10 +254,7 @@ pub fn send_keygen_transactions(
 		None => return Err(CallError::ReturnValueInvalid),
 	};
 
-	// let us send our part
-	let full_client = client.as_full_client().ok_or(CallError::NotFullClient)?;
-
-	let upcoming_epoch = get_posdao_epoch(client)? + 1;
+	let upcoming_epoch = get_posdao_epoch(client, BlockId::Latest)? + 1;
 
 	// Check if we already sent our part.
 	if !has_part_of_address_data(client, address)? {
@@ -262,8 +266,8 @@ pub fn send_keygen_transactions(
 			key_history_contract::functions::write_part::call(upcoming_epoch, serialized_part);
 
 		let part_transaction = TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_part_data.0)
-			.gas(U256::from(900_000))
-			.nonce(full_client.latest_nonce(&address))
+			.gas(U256::from(7_000_000))
+			.nonce(full_client.next_nonce(&address))
 			.gas_price(U256::from(10000000000u64));
 		full_client
 			.transact_silently(part_transaction)
@@ -294,8 +298,8 @@ pub fn send_keygen_transactions(
 			key_history_contract::functions::write_acks::call(upcoming_epoch, serialized_acks);
 
 		let acks_transaction = TransactionRequest::call(*KEYGEN_HISTORY_ADDRESS, write_acks_data.0)
-			.gas(U256::from(900_000))
-			.nonce(full_client.latest_nonce(&address))
+			.gas(U256::from(7_000_000))
+			.nonce(full_client.next_nonce(&address))
 			.gas_price(U256::from(10000000000u64));
 		full_client
 			.transact_silently(acks_transaction)

@@ -71,10 +71,8 @@ mod tests {
 	use crate::utils::test_helpers::{create_hbbft_client, hbbft_client_setup, HbbftTestClient};
 	use client_traits::BlockInfo;
 	use common_types::ids::BlockId;
-	use contracts::staking::get_posdao_epoch;
-	use contracts::staking::tests::{
-		create_staker, is_pool_active, start_time_of_next_phase_transition,
-	};
+	use contracts::staking::tests::{create_staker, is_pool_active};
+	use contracts::staking::{get_posdao_epoch, start_time_of_next_phase_transition};
 	use contracts::validator_set::{is_pending_validator, mining_by_staking_address};
 	use ethereum_types::{Address, H256, U256};
 	use hash::keccak;
@@ -231,7 +229,7 @@ mod tests {
 
 		// Check if we are still in the first epoch.
 		assert_eq!(
-			get_posdao_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
+			get_posdao_epoch(moc.client.as_ref(), BlockId::Latest).expect("Constant call must succeed"),
 			U256::from(0)
 		);
 
@@ -253,7 +251,7 @@ mod tests {
 
 		// At this point we should be in the new epoch.
 		assert_eq!(
-			get_posdao_epoch(moc.client.as_ref()).expect("Constant call must succeed"),
+			get_posdao_epoch(moc.client.as_ref(), BlockId::Latest).expect("Constant call must succeed"),
 			U256::from(1)
 		);
 
